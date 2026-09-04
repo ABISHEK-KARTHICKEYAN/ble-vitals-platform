@@ -9,16 +9,14 @@ from motor.motor_asyncio import AsyncIOMotorClient
 import bcrypt
 import jwt
 
-# --- Security & Auth Configurations ---
 SECRET_KEY = os.getenv("JWT_SECRET", "change-this-to-a-secure-secret-in-production-1234")
 ALGORITHM = "HS256"
-ACCESS_TOKEN_EXPIRE_MINUTES = 1440  # 24 hours
+ACCESS_TOKEN_EXPIRE_MINUTES = 1440
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/auth/login")
 
-# --- Database Setup (MongoDB Atlas) ---
 MONGO_URI = os.getenv(
-    "MONGO_URI", 
+    "MONGO_URI",
     "mongodb+srv://abishekkarthickeyanwork_db_user:GMfkqf1uCI5FpKxd@blevital.2lbg7cv.mongodb.net/?retryWrites=true&w=majority&appName=BLEVITAL"
 )
 client = AsyncIOMotorClient(MONGO_URI)
@@ -30,13 +28,12 @@ app = FastAPI(title="Vitals & Auth Cloud API")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origin_regex=r"^https://.*\.vercel\.app$|^http://(localhost|127\.0\.0\.1):[0-9]+$",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# --- Schemas ---
 class UserRegister(BaseModel):
     username: str
     email: EmailStr
@@ -52,19 +49,19 @@ class LogPayload(BaseModel):
     peak_ac: float
     status: str
 
-# --- Native Bcrypt Password Handling ---
 def hash_password(password: str) -> str:
     pwd_bytes = password.encode("utf-8")
     salt = bcrypt.gensalt()
     return bcrypt.hashpw(pwd_bytes, salt).decode("utf-8")
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
-    pwd_bytes = plain_password.encode("utf-8")
-    # Convert string back to bytes for bcrypt
-    hash_bytes = hashed_password.encode("utf-8") if isinstance(hashed_password, str) else hashed_password
-    return bcrypt.checkpw(pwd_bytes, hash_bytes)
+    try:
+        pwd_bytes = plain_password.encode("utf-8")
+        hash_bytes = hashed_password.encode("utf-8") if isinstance(hashed_password, str) else hashed_password
+        return bcrypt.checkpw(pwd_bytes, hash_bytes)
+    except Exception:
+        return False
 
-# --- JWT Helpers ---
 def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -> str:
     to_encode = data.copy()
     expire = datetime.now(timezone.utc) + (expires_delta or timedelta(minutes=15))
@@ -90,12 +87,10 @@ async def get_current_user(token: str = Depends(oauth2_scheme)):
         raise credentials_exception
     return user
 
-# --- Base Health Route ---
 @app.get("/")
 def root():
     return {"message": "Vitals Monitoring & Auth Service Online"}
 
-# --- Auth Endpoints ---
 @app.post("/api/auth/register", status_code=status.HTTP_201_CREATED)
 async def register(user_data: UserRegister):
     existing_user = await users_col.find_one(
@@ -103,7 +98,7 @@ async def register(user_data: UserRegister):
     )
     if existing_user:
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST, 
+            status_code=status.HTTP_400_BAD_REQUEST,
             detail="Username or email is already in use"
         )
 
@@ -137,7 +132,6 @@ async def login(form_data: OAuth2PasswordRequestForm = Depends()):
         "username": user["username"]
     }
 
-# --- Protected Vitals Endpoints ---
 @app.post("/api/log")
 async def create_log(entry: LogPayload, current_user: dict = Depends(get_current_user)):
     timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")

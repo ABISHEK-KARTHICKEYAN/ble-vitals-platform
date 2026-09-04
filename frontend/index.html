@@ -1,169 +1,502 @@
-import os
-from datetime import datetime, timedelta, timezone
-from typing import Optional
-from fastapi import FastAPI, HTTPException, Depends, status
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
-from pydantic import BaseModel, EmailStr
-from motor.motor_asyncio import AsyncIOMotorClient
-import bcrypt
-import jwt
-
-# --- Security Configurations ---
-SECRET_KEY = os.getenv("JWT_SECRET", "change-this-to-a-secure-secret-in-production-1234")
-ALGORITHM = "HS256"
-ACCESS_TOKEN_EXPIRE_MINUTES = 1440  # 24 hours
-
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/auth/login")
-
-# --- Database Setup (MongoDB Atlas) ---
-MONGO_URI = os.getenv(
-    "MONGO_URI",
-    "mongodb+srv://abishekkarthickeyanwork_db_user:GMfkqf1uCI5FpKxd@blevital.2lbg7cv.mongodb.net/?retryWrites=true&w=majority&appName=BLEVITAL"
-)
-client = AsyncIOMotorClient(MONGO_URI)
-db = client["vitals_database"]
-users_col = db["users"]
-vitals_col = db["vitals_logs"]
-
-app = FastAPI(title="Vitals & Auth Cloud API")
-
-# --- Explicit Cross-Origin Permissions ---
-origins = [
-    "https://ble-vitals-platform.vercel.app",
-    "http://localhost:3000",
-    "http://127.0.0.1:3000",
-    "http://localhost:8000",
-    "http://127.0.0.1:8000",
-]
-
-# Replace your CORS middleware with:
-app.add_middleware(
-    CORSMiddleware,
-    allow_origin_regex=r"https://.*\.vercel\.app|http://(localhost|127\.0\.0\.1):[0-9]+",
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
-# --- Schemas ---
-class UserRegister(BaseModel):
-    username: str
-    email: EmailStr
-    password: str
-
-class Token(BaseModel):
-    access_token: str
-    token_type: str
-    username: str
-
-class LogPayload(BaseModel):
-    bpm: float
-    peak_ac: float
-    status: str
-
-# --- Native Bcrypt Helpers ---
-def hash_password(password: str) -> str:
-    pwd_bytes = password.encode("utf-8")
-    salt = bcrypt.gensalt()
-    return bcrypt.hashpw(pwd_bytes, salt).decode("utf-8")
-
-def verify_password(plain_password: str, hashed_password: str) -> bool:
-    pwd_bytes = plain_password.encode("utf-8")
-    hash_bytes = hashed_password.encode("utf-8") if isinstance(hashed_password, str) else hashed_password
-    return bcrypt.checkpw(pwd_bytes, hash_bytes)
-
-# --- JWT Helpers ---
-def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -> str:
-    to_encode = data.copy()
-    expire = datetime.now(timezone.utc) + (expires_delta or timedelta(minutes=15))
-    to_encode.update({"exp": expire})
-    return jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
-
-async def get_current_user(token: str = Depends(oauth2_scheme)):
-    credentials_exception = HTTPException(
-        status_code=status.HTTP_401_UNAUTHORIZED,
-        detail="Could not validate credentials",
-        headers={"WWW-Authenticate": "Bearer"},
-    )
-    try:
-        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
-        username: str = payload.get("sub")
-        if username is None:
-            raise credentials_exception
-    except jwt.PyJWTError:
-        raise credentials_exception
-
-    user = await users_col.find_one({"username": username})
-    if user is None:
-        raise credentials_exception
-    return user
-
-# --- Health Check ---
-@app.get("/")
-def root():
-    return {"message": "Vitals Monitoring & Auth Service Online"}
-
-# --- Auth Routes ---
-@app.post("/api/auth/register", status_code=status.HTTP_201_CREATED)
-async def register(user_data: UserRegister):
-    existing_user = await users_col.find_one(
-        {"$or": [{"username": user_data.username}, {"email": user_data.email}]}
-    )
-    if existing_user:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Username or email is already in use"
-        )
-
-    hashed = hash_password(user_data.password)
-    new_user = {
-        "username": user_data.username,
-        "email": user_data.email,
-        "hashed_password": hashed,
-        "created_at": datetime.now(timezone.utc)
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Vitals Telemetry System</title>
+  <style>
+    :root {
+      --bg: #050505;
+      --card-bg: #0e0e0e;
+      --border: #262626;
+      --border-bright: #ffffff;
+      --text: #ffffff;
+      --text-muted: #737373;
     }
-    await users_col.insert_one(new_user)
-    return {"message": "User registered successfully"}
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: "Courier New", Courier, monospace;
+      padding: 2rem 1rem;
+      display: flex;
+      justify-content: center;
+      position: relative;
+      overflow-x: hidden;
+    }
+    body::before {
+      content: " ";
+      position: fixed;
+      top: 0; left: 0; bottom: 0; right: 0;
+      background: linear-gradient(rgba(18, 16, 16, 0) 50%, rgba(0, 0, 0, 0.3) 50%),
+                  linear-gradient(90deg, rgba(255, 0, 0, 0.02), rgba(0, 255, 0, 0.01), rgba(0, 0, 255, 0.02));
+      background-size: 100% 3px, 6px 100%;
+      pointer-events: none;
+      z-index: 999;
+    }
+    .container {
+      width: 100%;
+      max-width: 880px;
+      display: flex;
+      flex-direction: column;
+      gap: 1.5rem;
+      z-index: 1;
+    }
+    header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      border-bottom: 2px solid var(--border-bright);
+      padding-bottom: 1rem;
+    }
+    .btn {
+      background: #000000;
+      color: #ffffff;
+      border: 1px solid var(--border-bright);
+      padding: 0.55rem 1.1rem;
+      font-family: inherit;
+      font-size: 0.85rem;
+      font-weight: bold;
+      cursor: pointer;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+    }
+    .btn:hover {
+      background: #ffffff;
+      color: #000000;
+      box-shadow: 0 0 12px rgba(255, 255, 255, 0.6);
+      transform: translateY(-1px);
+    }
+    .card {
+      background: var(--card-bg);
+      border: 1px solid var(--border);
+      padding: 1.25rem;
+      box-shadow: 0 4px 20px rgba(0,0,0,0.8);
+    }
+    .grid-3 {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+      gap: 1rem;
+      margin-top: 1rem;
+    }
+    .metric-box {
+      border: 1px solid var(--border);
+      padding: 1rem;
+      background: #080808;
+    }
+    .metric-label {
+      color: var(--text-muted);
+      font-size: 0.75rem;
+      text-transform: uppercase;
+      display: flex;
+      justify-content: space-between;
+    }
+    .metric-value {
+      font-size: 2.2rem;
+      font-weight: bold;
+      margin-top: 0.25rem;
+      letter-spacing: -1px;
+    }
+    .pulse-dot {
+      display: inline-block;
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: #ffffff;
+      opacity: 0.2;
+    }
+    .pulsing {
+      animation: heartbeat 0.85s infinite ease-in-out;
+    }
+    @keyframes heartbeat {
+      0% { transform: scale(1); opacity: 0.2; }
+      30% { transform: scale(1.6); opacity: 1; box-shadow: 0 0 10px #ffffff; }
+      100% { transform: scale(1); opacity: 0.2; }
+    }
+    .waveform-wrapper {
+      position: relative;
+      width: 100%;
+      height: 220px;
+      background: #020202;
+      border: 1px solid var(--border);
+      margin-top: 1rem;
+      overflow: hidden;
+    }
+    canvas { width: 100%; height: 100%; display: block; }
+    .scanner {
+      position: absolute;
+      top: 0; left: 0; width: 3px; height: 100%;
+      background: linear-gradient(180deg, transparent, #ffffff, transparent);
+      box-shadow: 0 0 12px 2px rgba(255, 255, 255, 0.8);
+      animation: sweep 3s infinite linear;
+      pointer-events: none;
+      opacity: 0.4;
+    }
+    @keyframes sweep { 0% { left: -5%; } 100% { left: 105%; } }
+    input {
+      width: 100%;
+      background: #000000;
+      border: 1px solid var(--border);
+      color: #ffffff;
+      padding: 0.65rem;
+      margin-bottom: 0.75rem;
+      font-family: inherit;
+    }
+    input:focus { outline: none; border-color: var(--border-bright); }
+    table { width: 100%; border-collapse: collapse; margin-top: 1rem; font-size: 0.8rem; }
+    th, td { border: 1px solid var(--border); padding: 0.6rem; text-align: left; }
+    th { background: #111111; color: var(--text-muted); text-transform: uppercase; }
+  </style>
+</head>
+<body>
 
-@app.post("/api/auth/login", response_model=Token)
-async def login(form_data: OAuth2PasswordRequestForm = Depends()):
-    user = await users_col.find_one({"username": form_data.username})
-    if not user or not verify_password(form_data.password, user["hashed_password"]):
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid username or password",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
+<div class="container">
+  <header>
+    <div>
+      <h2 style="letter-spacing: 1px;">PPG VITALS GATEWAY</h2>
+      <div id="authStatus" style="font-size: 0.8rem; color: var(--text-muted); margin-top: 4px;">STATUS: UNAUTHORIZED</div>
+    </div>
+    <button id="authBtn" class="btn" onclick="toggleAuthModal()">LOGIN / REGISTER</button>
+  </header>
 
-    access_token = create_access_token(
-        data={"sub": user["username"]},
-        expires_delta=timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
-    )
-    return {
-        "access_token": access_token,
-        "token_type": "bearer",
-        "username": user["username"]
+  <div id="authCard" class="card" style="display: none;">
+    <h4 id="authFormTitle" style="margin-bottom: 1rem;">AUTHENTICATE SESSION</h4>
+    <input type="text" id="authUsername" placeholder="USERNAME" />
+    <input type="email" id="authEmail" placeholder="EMAIL (REGISTER ONLY)" style="display: none;" />
+    <input type="password" id="authPassword" placeholder="PASSWORD" />
+    <div style="display: flex; gap: 0.5rem;">
+      <button class="btn" id="submitAuthBtn" onclick="handleAuthSubmit()">SUBMIT</button>
+      <button class="btn" onclick="toggleAuthMode()">SWITCH MODE</button>
+    </div>
+  </div>
+
+  <div class="card">
+    <div style="display: flex; justify-content: space-between; align-items: center;">
+      <button class="btn" onclick="connectBLE()">PAIR BLE SENSOR</button>
+      <div style="display: flex; align-items: center; gap: 8px;">
+        <span class="pulse-dot" id="liveDot"></span>
+        <span id="bleStatus" style="color: var(--text-muted); font-size: 0.8rem;">DISCONNECTED</span>
+      </div>
+    </div>
+
+    <div class="grid-3">
+      <div class="metric-box">
+        <div class="metric-label">Pulse Rate <span>[BPM]</span></div>
+        <div class="metric-value" id="bpmVal">--</div>
+      </div>
+      <div class="metric-box">
+        <div class="metric-label">Signal Peak AC <span>[RAW]</span></div>
+        <div class="metric-value" id="acVal">--</div>
+      </div>
+      <div class="metric-box">
+        <div class="metric-label">Classification <span>[AI/RULE]</span></div>
+        <div class="metric-value" id="statusVal" style="font-size: 1.25rem;">--</div>
+      </div>
+    </div>
+
+    <div class="waveform-wrapper">
+      <div class="scanner"></div>
+      <canvas id="scopeCanvas"></canvas>
+    </div>
+  </div>
+
+  <div class="card">
+    <div style="display: flex; justify-content: space-between; align-items: center;">
+      <span style="font-weight: bold; text-transform: uppercase;">Cloud Database Logs</span>
+      <button class="btn" onclick="fetchLogs()">FETCH LOGS</button>
+    </div>
+    <table>
+      <thead>
+        <tr>
+          <th>Timestamp (UTC)</th>
+          <th>BPM</th>
+          <th>Peak AC</th>
+          <th>Status</th>
+        </tr>
+      </thead>
+      <tbody id="logsTableBody">
+        <tr><td colspan="4" style="text-align: center; color: var(--text-muted);">NO RECORDS LOADED</td></tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<script>
+  const BACKEND_URL = "https://vitals-backend-api.onrender.com";
+  const SERVICE_UUID = "4fafc201-1fb5-459e-8fcc-c5c9c331914b";
+  const CHAR_UUID = "beb5483e-36e1-4688-b7f5-ea07361b26a8";
+
+  let token = localStorage.getItem("access_token") || null;
+  let currentUser = localStorage.getItem("username") || null;
+  let isRegisterMode = false;
+  let lastLogTime = 0;
+
+  let currentBPM = 0;
+  let currentAC = 0;
+  let isConnected = false;
+
+  const canvas = document.getElementById("scopeCanvas");
+  const ctx = canvas.getContext("2d");
+  const maxPoints = 300;
+  let waveBuffer = new Array(maxPoints).fill(0);
+  let pulsePhase = 0;
+
+  function resizeCanvas() {
+    canvas.width = canvas.parentElement.clientWidth;
+    canvas.height = canvas.parentElement.clientHeight;
+  }
+  window.addEventListener("resize", resizeCanvas);
+  resizeCanvas();
+
+  function getPPGPoint() {
+    if (!isConnected || currentBPM <= 30) return Math.sin(Date.now() / 200) * 2;
+    const freq = currentBPM / 60;
+    pulsePhase += (freq * 2 * Math.PI) / 60;
+    if (pulsePhase > 2 * Math.PI) pulsePhase -= 2 * Math.PI;
+
+    const t = pulsePhase;
+    const amp = Math.max(currentAC, 35);
+    const p1 = Math.exp(-Math.pow((t - 1.2) / 0.45, 2)) * 1.0;
+    const p2 = Math.exp(-Math.pow((t - 2.4) / 0.55, 2)) * 0.35;
+    return (p1 + p2) * amp + (Math.random() * 1.5 - 0.75);
+  }
+
+  function renderScope() {
+    waveBuffer.push(getPPGPoint());
+    waveBuffer.shift();
+
+    ctx.fillStyle = "rgba(2, 2, 2, 0.9)";
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    ctx.strokeStyle = "#161616";
+    ctx.lineWidth = 1;
+    for (let x = 0; x < canvas.width; x += 30) {
+      ctx.beginPath();
+      ctx.moveTo(x, 0); ctx.lineTo(x, canvas.height); ctx.stroke();
+    }
+    for (let y = 0; y < canvas.height; y += 30) {
+      ctx.beginPath();
+      ctx.moveTo(0, y); ctx.lineTo(canvas.width, y); ctx.stroke();
     }
 
-# --- Telemetry Routes ---
-@app.post("/api/log")
-async def create_log(entry: LogPayload, current_user: dict = Depends(get_current_user)):
-    timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
-    doc = {
-        "user": current_user["username"],
-        "timestamp": timestamp,
-        "bpm": entry.bpm,
-        "peak_ac": entry.peak_ac,
-        "status": entry.status
-    }
-    result = await vitals_col.insert_one(doc)
-    return {"status": "success", "id": str(result.inserted_id), "saved_at": timestamp}
+    let min = Math.min(...waveBuffer);
+    let max = Math.max(...waveBuffer);
+    let range = max - min;
+    if (range < 15) range = 15;
 
-@app.get("/api/logs")
-async def fetch_recent_logs(limit: int = 20, current_user: dict = Depends(get_current_user)):
-    cursor = vitals_col.find({"user": current_user["username"]}).sort("_id", -1).limit(limit)
-    rows = await cursor.to_list(length=limit)
-    for r in rows:
-        r["_id"] = str(r["_id"])
-    return rows
+    ctx.strokeStyle = "#ffffff";
+    ctx.lineWidth = 2.2;
+    ctx.shadowBlur = 8;
+    ctx.shadowColor = "#ffffff";
+    ctx.beginPath();
+
+    const step = canvas.width / (maxPoints - 1);
+    const padding = 25;
+    const usableHeight = canvas.height - padding * 2;
+
+    for (let i = 0; i < maxPoints; i++) {
+      const norm = (waveBuffer[i] - min) / range;
+      const y = canvas.height - padding - (norm * usableHeight);
+      const x = i * step;
+      if (i === 0) ctx.moveTo(x, y);
+      else ctx.lineTo(x, y);
+    }
+    ctx.stroke();
+    ctx.shadowBlur = 0;
+    requestAnimationFrame(renderScope);
+  }
+  requestAnimationFrame(renderScope);
+
+  updateAuthUI();
+
+  function toggleAuthModal() {
+    const card = document.getElementById("authCard");
+    card.style.display = card.style.display === "none" ? "block" : "none";
+  }
+
+  function toggleAuthMode() {
+    isRegisterMode = !isRegisterMode;
+    document.getElementById("authFormTitle").innerText = isRegisterMode ? "REGISTER ACCOUNT" : "AUTHENTICATE SESSION";
+    document.getElementById("authEmail").style.display = isRegisterMode ? "block" : "none";
+  }
+
+  async function handleAuthSubmit() {
+    const u = document.getElementById("authUsername").value.trim();
+    const p = document.getElementById("authPassword").value.trim();
+    const e = document.getElementById("authEmail").value.trim();
+
+    if (!u || !p) return alert("Enter username and password.");
+
+    try {
+      if (isRegisterMode) {
+        const res = await fetch(`${BACKEND_URL}/api/auth/register`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ username: u, email: e, password: p })
+        });
+        if (res.ok) {
+          alert("Registration complete. Please sign in.");
+          toggleAuthMode();
+        } else {
+          const err = await res.json();
+          alert(err.detail || "Registration failed");
+        }
+      } else {
+        const form = new URLSearchParams();
+        form.append("username", u);
+        form.append("password", p);
+
+        const res = await fetch(`${BACKEND_URL}/api/auth/login`, {
+          method: "POST",
+          headers: { "Content-Type": "application/x-www-form-urlencoded" },
+          body: form
+        });
+        if (res.ok) {
+          const data = await res.json();
+          token = data.access_token;
+          currentUser = data.username;
+          localStorage.setItem("access_token", token);
+          localStorage.setItem("username", currentUser);
+          toggleAuthModal();
+          updateAuthUI();
+          fetchLogs();
+        } else {
+          alert("Invalid credentials.");
+        }
+      }
+    } catch (err) {
+      alert("Backend unreachable. Ensure Render instance is active.");
+    }
+  }
+
+  function logout() {
+    token = null;
+    currentUser = null;
+    localStorage.removeItem("access_token");
+    localStorage.removeItem("username");
+    updateAuthUI();
+  }
+
+  function updateAuthUI() {
+    const status = document.getElementById("authStatus");
+    const btn = document.getElementById("authBtn");
+    if (token && currentUser) {
+      status.innerText = `SESSION: ACTIVE [${currentUser.toUpperCase()}]`;
+      btn.innerText = "LOGOUT";
+      btn.onclick = logout;
+      fetchLogs();
+    } else {
+      status.innerText = "STATUS: UNAUTHORIZED";
+      btn.innerText = "LOGIN / REGISTER";
+      btn.onclick = toggleAuthModal;
+    }
+  }
+
+  async function connectBLE() {
+    if (!token) {
+      alert("Authenticate before pairing sensor.");
+      toggleAuthModal();
+      return;
+    }
+    try {
+      const device = await navigator.bluetooth.requestDevice({
+        filters: [{ namePrefix: "ESP32" }],
+        optionalServices: [SERVICE_UUID]
+      });
+      document.getElementById("bleStatus").innerText = "CONNECTING...";
+      const server = await device.gatt.connect();
+      const service = await server.getPrimaryService(SERVICE_UUID);
+      const char = await service.getCharacteristic(CHAR_UUID);
+
+      await char.startNotifications();
+      char.addEventListener("characteristicvaluechanged", handleBLEData);
+      
+      isConnected = true;
+      document.getElementById("bleStatus").innerText = "STREAMING: " + device.name.toUpperCase();
+      document.getElementById("liveDot").classList.add("pulsing");
+    } catch (err) {
+      document.getElementById("bleStatus").innerText = "ERROR: " + err.message.toUpperCase();
+      isConnected = false;
+      document.getElementById("liveDot").classList.remove("pulsing");
+    }
+  }
+
+  function handleBLEData(event) {
+    const raw = new TextDecoder().decode(event.target.value);
+    try {
+      const data = JSON.parse(raw);
+      currentBPM = data.bpm || 0;
+      currentAC = data.peak_ac || 0;
+
+      document.getElementById("bpmVal").innerText = currentBPM;
+      document.getElementById("acVal").innerText = currentAC;
+      document.getElementById("statusVal").innerText = (data.status || "--").toUpperCase();
+
+      if (currentBPM > 40) {
+        const pulseInterval = (60 / currentBPM).toFixed(2);
+        document.getElementById("liveDot").style.animationDuration = `${pulseInterval}s`;
+      }
+
+      const now = Date.now();
+      if (now - lastLogTime > 3000) {
+        lastLogTime = now;
+        sendLog(data);
+      }
+    } catch (e) {
+      console.warn("Raw packet error:", raw);
+    }
+  }
+
+  async function sendLog(data) {
+    if (!token) return;
+    try {
+      await fetch(`${BACKEND_URL}/api/log`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${token}`
+        },
+        body: JSON.stringify({
+          bpm: data.bpm,
+          peak_ac: data.peak_ac,
+          status: data.status
+        })
+      });
+    } catch (err) {
+      console.error(err);
+    }
+  }
+
+  async function fetchLogs() {
+    if (!token) return;
+    try {
+      const res = await fetch(`${BACKEND_URL}/api/logs?limit=10`, {
+        headers: { "Authorization": `Bearer ${token}` }
+      });
+      if (res.ok) {
+        const logs = await res.json();
+        const tbody = document.getElementById("logsTableBody");
+        tbody.innerHTML = "";
+        if (logs.length === 0) {
+          tbody.innerHTML = `<tr><td colspan="4" style="text-align:center;">NO LOGS FOUND</td></tr>`;
+          return;
+        }
+        logs.forEach(row => {
+          const tr = document.createElement("tr");
+          tr.innerHTML = `
+            <td>${row.timestamp}</td>
+            <td>${row.bpm}</td>
+            <td>${row.peak_ac}</td>
+            <td>${row.status}</td>
+          `;
+          tbody.appendChild(tr);
+        });
+      }
+    } catch (err) {
+      console.error(err);
+    }
+  }
+</script>
+</body>
+</html>
