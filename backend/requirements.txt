@@ -1,3 +1,8 @@
 fastapi
-uvicorn
+uvicorn[standard]
 pydantic
+email-validator
+python-multipart
+motor
+bcrypt
+pyjwt

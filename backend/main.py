@@ -1,11 +1,32 @@
-import sqlite3
-from datetime import datetime
-from typing import List
-from fastapi import FastAPI
+import os
+from datetime import datetime, timedelta, timezone
+from typing import Optional
+from fastapi import FastAPI, HTTPException, Depends, status
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
+from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
+from pydantic import BaseModel, EmailStr
+from motor.motor_asyncio import AsyncIOMotorClient
+import bcrypt
+import jwt
 
-app = FastAPI(title="Vitals Logging API")
+# --- Security & Auth Configurations ---
+SECRET_KEY = os.getenv("JWT_SECRET", "change-this-to-a-secure-secret-in-production-1234")
+ALGORITHM = "HS256"
+ACCESS_TOKEN_EXPIRE_MINUTES = 1440  # 24 hours
+
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/auth/login")
+
+# --- Database Setup (MongoDB Atlas) ---
+MONGO_URI = os.getenv(
+    "MONGO_URI", 
+    "mongodb+srv://abishekkarthickeyanwork_db_user:GMfkqf1uCI5FpKxd@blevital.2lbg7cv.mongodb.net/?retryWrites=true&w=majority&appName=BLEVITAL"
+)
+client = AsyncIOMotorClient(MONGO_URI)
+db = client["vitals_database"]
+users_col = db["users"]
+vitals_col = db["vitals_logs"]
+
+app = FastAPI(title="Vitals & Auth Cloud API")
 
 app.add_middleware(
     CORSMiddleware,
@@ -15,62 +36,125 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-DB_FILE = "vitals.db"
+# --- Schemas ---
+class UserRegister(BaseModel):
+    username: str
+    email: EmailStr
+    password: str
 
-def init_db():
-    with sqlite3.connect(DB_FILE) as conn:
-        cursor = conn.cursor()
-        cursor.execute(
-            """
-            CREATE TABLE IF NOT EXISTS vitals_log (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                timestamp TEXT NOT NULL,
-                bpm REAL NOT NULL,
-                peak_ac REAL NOT NULL,
-                status TEXT NOT NULL
-            )
-            """
-        )
-        conn.commit()
-
-init_db()
+class Token(BaseModel):
+    access_token: str
+    token_type: str
+    username: str
 
 class LogPayload(BaseModel):
     bpm: float
     peak_ac: float
     status: str
 
-class LogRecord(BaseModel):
-    id: int
-    timestamp: str
-    bpm: float
-    peak_ac: float
-    status: str
+# --- Native Bcrypt Password Handling ---
+def hash_password(password: str) -> str:
+    pwd_bytes = password.encode("utf-8")
+    salt = bcrypt.gensalt()
+    return bcrypt.hashpw(pwd_bytes, salt).decode("utf-8")
 
+def verify_password(plain_password: str, hashed_password: str) -> bool:
+    pwd_bytes = plain_password.encode("utf-8")
+    # Convert string back to bytes for bcrypt
+    hash_bytes = hashed_password.encode("utf-8") if isinstance(hashed_password, str) else hashed_password
+    return bcrypt.checkpw(pwd_bytes, hash_bytes)
+
+# --- JWT Helpers ---
+def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -> str:
+    to_encode = data.copy()
+    expire = datetime.now(timezone.utc) + (expires_delta or timedelta(minutes=15))
+    to_encode.update({"exp": expire})
+    return jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
+
+async def get_current_user(token: str = Depends(oauth2_scheme)):
+    credentials_exception = HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Could not validate credentials",
+        headers={"WWW-Authenticate": "Bearer"},
+    )
+    try:
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        username: str = payload.get("sub")
+        if username is None:
+            raise credentials_exception
+    except jwt.PyJWTError:
+        raise credentials_exception
+
+    user = await users_col.find_one({"username": username})
+    if user is None:
+        raise credentials_exception
+    return user
+
+# --- Base Health Route ---
 @app.get("/")
 def root():
-    return {"message": "Vitals Monitoring Service Online"}
+    return {"message": "Vitals Monitoring & Auth Service Online"}
 
+# --- Auth Endpoints ---
+@app.post("/api/auth/register", status_code=status.HTTP_201_CREATED)
+async def register(user_data: UserRegister):
+    existing_user = await users_col.find_one(
+        {"$or": [{"username": user_data.username}, {"email": user_data.email}]}
+    )
+    if existing_user:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, 
+            detail="Username or email is already in use"
+        )
+
+    hashed = hash_password(user_data.password)
+    new_user = {
+        "username": user_data.username,
+        "email": user_data.email,
+        "hashed_password": hashed,
+        "created_at": datetime.now(timezone.utc)
+    }
+    await users_col.insert_one(new_user)
+    return {"message": "User registered successfully"}
+
+@app.post("/api/auth/login", response_model=Token)
+async def login(form_data: OAuth2PasswordRequestForm = Depends()):
+    user = await users_col.find_one({"username": form_data.username})
+    if not user or not verify_password(form_data.password, user["hashed_password"]):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid username or password",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    access_token = create_access_token(
+        data={"sub": user["username"]},
+        expires_delta=timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+    )
+    return {
+        "access_token": access_token,
+        "token_type": "bearer",
+        "username": user["username"]
+    }
+
+# --- Protected Vitals Endpoints ---
 @app.post("/api/log")
-def create_log(entry: LogPayload):
-    current_time = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
-    with sqlite3.connect(DB_FILE) as conn:
-        cursor = conn.cursor()
-        cursor.execute(
-            "INSERT INTO vitals_log (timestamp, bpm, peak_ac, status) VALUES (?, ?, ?, ?)",
-            (current_time, entry.bpm, entry.peak_ac, entry.status),
-        )
-        conn.commit()
-    return {"status": "success", "saved_at": current_time}
+async def create_log(entry: LogPayload, current_user: dict = Depends(get_current_user)):
+    timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+    doc = {
+        "user": current_user["username"],
+        "timestamp": timestamp,
+        "bpm": entry.bpm,
+        "peak_ac": entry.peak_ac,
+        "status": entry.status
+    }
+    result = await vitals_col.insert_one(doc)
+    return {"status": "success", "id": str(result.inserted_id), "saved_at": timestamp}
 
-@app.get("/api/logs", response_model=List[LogRecord])
-def fetch_recent_logs(limit: int = 20):
-    with sqlite3.connect(DB_FILE) as conn:
-        conn.row_factory = sqlite3.Row
-        cursor = conn.cursor()
-        cursor.execute(
-            "SELECT id, timestamp, bpm, peak_ac, status FROM vitals_log ORDER BY id DESC LIMIT ?",
-            (limit,),
-        )
-        rows = cursor.fetchall()
-        return [dict(row) for row in rows]
+@app.get("/api/logs")
+async def fetch_recent_logs(limit: int = 20, current_user: dict = Depends(get_current_user)):
+    cursor = vitals_col.find({"user": current_user["username"]}).sort("_id", -1).limit(limit)
+    rows = await cursor.to_list(length=limit)
+    for r in rows:
+        r["_id"] = str(r["_id"])
+    return rows
