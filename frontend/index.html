@@ -1,684 +1,550 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>IoT Vitals Telemetry Platform</title>
-    <style>
-        :root {
-            --bg-color: #0d1117;
-            --card-bg: #161b22;
-            --border-color: #30363d;
-            --accent-green: #2ea043;
-            --accent-cyan: #58a6ff;
-            --accent-amber: #d29922;
-            --accent-red: #f85149;
-            --text-main: #c9d1d9;
-            --text-muted: #8b949e;
-            --crt-glow: rgba(88, 166, 255, 0.35);
-        }
-
-        * {
-            box-sizing: border-box;
-            margin: 0;
-            padding: 0;
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, monospace;
-        }
-
-        body {
-            background-color: var(--bg-color);
-            color: var(--text-main);
-            padding: 16px;
-            display: flex;
-            justify-content: center;
-        }
-
-        .container {
-            width: 100%;
-            max-width: 900px;
-            display: flex;
-            flex-direction: column;
-            gap: 16px;
-        }
-
-        header {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            border-bottom: 1px solid var(--border-color);
-            padding-bottom: 12px;
-            flex-wrap: wrap;
-            gap: 10px;
-        }
-
-        h1 {
-            font-size: 1.25rem;
-            letter-spacing: 0.5px;
-            color: #ffffff;
-            display: flex;
-            align-items: center;
-            gap: 8px;
-        }
-
-        .status-dot {
-            width: 10px;
-            height: 10px;
-            border-radius: 50%;
-            background-color: var(--accent-red);
-            display: inline-block;
-        }
-
-        .status-dot.connected {
-            background-color: var(--accent-green);
-            box-shadow: 0 0 8px var(--accent-green);
-        }
-
-        .controls {
-            display: flex;
-            gap: 8px;
-            flex-wrap: wrap;
-        }
-
-        button {
-            background-color: var(--card-bg);
-            color: var(--text-main);
-            border: 1px solid var(--border-color);
-            padding: 8px 14px;
-            border-radius: 6px;
-            font-size: 0.85rem;
-            font-weight: 600;
-            cursor: pointer;
-            transition: all 0.2s ease;
-        }
-
-        button:hover {
-            background-color: #21262d;
-            border-color: #8b949e;
-        }
-
-        button.primary {
-            background-color: var(--accent-green);
-            color: #ffffff;
-            border: none;
-        }
-
-        button.primary:hover {
-            background-color: #2c974b;
-        }
-
-        .metric-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
-            gap: 12px;
-        }
-
-        .metric-card {
-            background-color: var(--card-bg);
-            border: 1px solid var(--border-color);
-            border-radius: 8px;
-            padding: 14px;
-            display: flex;
-            flex-direction: column;
-            gap: 6px;
-        }
-
-        .metric-label {
-            font-size: 0.75rem;
-            color: var(--text-muted);
-            text-transform: uppercase;
-            font-weight: 700;
-        }
-
-        .metric-value {
-            font-size: 1.8rem;
-            font-weight: 700;
-            color: #ffffff;
-            display: flex;
-            align-items: baseline;
-            gap: 4px;
-        }
-
-        .metric-unit {
-            font-size: 0.8rem;
-            color: var(--text-muted);
-            font-weight: normal;
-        }
-
-        .card-canvas {
-            background-color: #040d1a;
-            border: 1px solid var(--border-color);
-            border-radius: 8px;
-            padding: 12px;
-            position: relative;
-            overflow: hidden;
-        }
-
-        .canvas-header {
-            display: flex;
-            justify-content: space-between;
-            font-size: 0.75rem;
-            color: var(--accent-cyan);
-            margin-bottom: 8px;
-            font-weight: 600;
-        }
-
-        canvas {
-            width: 100%;
-            height: 200px;
-            display: block;
-            border-radius: 4px;
-            background-color: #010409;
-        }
-
-        .log-section {
-            background-color: var(--card-bg);
-            border: 1px solid var(--border-color);
-            border-radius: 8px;
-            padding: 14px;
-            display: flex;
-            flex-direction: column;
-            gap: 10px;
-        }
-
-        .log-table-wrapper {
-            max-height: 220px;
-            overflow-y: auto;
-        }
-
-        table {
-            width: 100%;
-            border-collapse: collapse;
-            font-size: 0.8rem;
-            text-align: left;
-        }
-
-        th, td {
-            padding: 8px 10px;
-            border-bottom: 1px solid var(--border-color);
-        }
-
-        th {
-            color: var(--text-muted);
-            font-size: 0.75rem;
-            text-transform: uppercase;
-            position: sticky;
-            top: 0;
-            background: var(--card-bg);
-        }
-
-        .modal {
-            display: none;
-            position: fixed;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            background: rgba(0, 0, 0, 0.7);
-            justify-content: center;
-            align-items: center;
-            z-index: 1000;
-        }
-
-        .modal-content {
-            background: var(--card-bg);
-            border: 1px solid var(--border-color);
-            border-radius: 8px;
-            padding: 24px;
-            width: 90%;
-            max-width: 360px;
-            display: flex;
-            flex-direction: column;
-            gap: 12px;
-        }
-
-        .modal-content input {
-            background: #0d1117;
-            border: 1px solid var(--border-color);
-            color: #ffffff;
-            padding: 10px;
-            border-radius: 6px;
-            font-size: 0.9rem;
-        }
-
-        .heart-beat {
-            display: inline-block;
-            transition: transform 0.1s ease;
-        }
-
-        .heart-beat.pulsing {
-            transform: scale(1.3);
-            filter: drop-shadow(0 0 6px var(--accent-red));
-        }
-    </style>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Vitals Telemetry System</title>
+  <style>
+    :root {
+      --bg: #050505;
+      --card-bg: #0e0e0e;
+      --border: #262626;
+      --border-bright: #ffffff;
+      --text: #ffffff;
+      --text-muted: #737373;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: "Courier New", Courier, monospace;
+      padding: 2rem 1rem;
+      display: flex;
+      justify-content: center;
+      position: relative;
+      overflow-x: hidden;
+    }
+    body::before {
+      content: " ";
+      position: fixed;
+      top: 0; left: 0; bottom: 0; right: 0;
+      background: linear-gradient(rgba(18, 16, 16, 0) 50%, rgba(0, 0, 0, 0.3) 50%),
+                  linear-gradient(90deg, rgba(255, 0, 0, 0.02), rgba(0, 255, 0, 0.01), rgba(0, 0, 255, 0.02));
+      background-size: 100% 3px, 6px 100%;
+      pointer-events: none;
+      z-index: 999;
+    }
+    .container {
+      width: 100%;
+      max-width: 880px;
+      display: flex;
+      flex-direction: column;
+      gap: 1.5rem;
+      z-index: 1;
+    }
+    header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      border-bottom: 2px solid var(--border-bright);
+      padding-bottom: 1rem;
+    }
+    .btn {
+      background: #000000;
+      color: #ffffff;
+      border: 1px solid var(--border-bright);
+      padding: 0.55rem 1.1rem;
+      font-family: inherit;
+      font-size: 0.85rem;
+      font-weight: bold;
+      cursor: pointer;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+    }
+    .btn:hover {
+      background: #ffffff;
+      color: #000000;
+      box-shadow: 0 0 12px rgba(255, 255, 255, 0.6);
+      transform: translateY(-1px);
+    }
+    .card {
+      background: var(--card-bg);
+      border: 1px solid var(--border);
+      padding: 1.25rem;
+      box-shadow: 0 4px 20px rgba(0,0,0,0.8);
+    }
+    .grid-3 {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+      gap: 1rem;
+      margin-top: 1rem;
+    }
+    .metric-box {
+      border: 1px solid var(--border);
+      padding: 1rem;
+      background: #080808;
+    }
+    .metric-label {
+      color: var(--text-muted);
+      font-size: 0.75rem;
+      text-transform: uppercase;
+      display: flex;
+      justify-content: space-between;
+    }
+    .metric-value {
+      font-size: 2.2rem;
+      font-weight: bold;
+      margin-top: 0.25rem;
+      letter-spacing: -1px;
+    }
+    .pulse-dot {
+      display: inline-block;
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: #ffffff;
+      opacity: 0.2;
+    }
+    .pulsing {
+      animation: heartbeat 0.85s infinite ease-in-out;
+    }
+    @keyframes heartbeat {
+      0% { transform: scale(1); opacity: 0.2; }
+      30% { transform: scale(1.6); opacity: 1; box-shadow: 0 0 10px #ffffff; }
+      100% { transform: scale(1); opacity: 0.2; }
+    }
+    .waveform-wrapper {
+      position: relative;
+      width: 100%;
+      height: 220px;
+      background: #020202;
+      border: 1px solid var(--border);
+      margin-top: 1rem;
+      overflow: hidden;
+    }
+    canvas { width: 100%; height: 100%; display: block; }
+    .scanner {
+      position: absolute;
+      top: 0; left: 0; width: 3px; height: 100%;
+      background: linear-gradient(180deg, transparent, #ffffff, transparent);
+      box-shadow: 0 0 12px 2px rgba(255, 255, 255, 0.8);
+      animation: sweep 3s infinite linear;
+      pointer-events: none;
+      opacity: 0.4;
+    }
+    @keyframes sweep { 0% { left: -5%; } 100% { left: 105%; } }
+    input {
+      width: 100%;
+      background: #000000;
+      border: 1px solid var(--border);
+      color: #ffffff;
+      padding: 0.65rem;
+      margin-bottom: 0.75rem;
+      font-family: inherit;
+    }
+    input:focus { outline: none; border-color: var(--border-bright); }
+    table { width: 100%; border-collapse: collapse; margin-top: 1rem; font-size: 0.8rem; }
+    th, td { border: 1px solid var(--border); padding: 0.6rem; text-align: left; }
+    th { background: #111111; color: var(--text-muted); text-transform: uppercase; }
+  </style>
 </head>
 <body>
 
 <div class="container">
-    <header>
-        <h1><span id="connDot" class="status-dot"></span> Vitals Telemetry Node</h1>
-        <div class="controls">
-            <button id="authBtn">Login / Register</button>
-            <button id="scanBtn" class="primary">Pair BLE Sensor</button>
-        </div>
-    </header>
+  <header>
+    <div>
+      <h2 style="letter-spacing: 1px;">PPG VITALS GATEWAY</h2>
+      <div id="authStatus" style="font-size: 0.8rem; color: var(--text-muted); margin-top: 4px;">STATUS: UNAUTHORIZED</div>
+    </div>
+    <button id="authBtn" class="btn" onclick="toggleAuthModal()">LOGIN / REGISTER</button>
+  </header>
 
-    <div class="metric-grid">
-        <div class="metric-card">
-            <div class="metric-label">Heart Rate <span id="heartIcon" class="heart-beat">❤️</span></div>
-            <div class="metric-value"><span id="bpmDisplay">--</span><span class="metric-unit">BPM</span></div>
-        </div>
-        <div class="metric-card">
-            <div class="metric-label">Rolling Avg (5s)</div>
-            <div class="metric-value"><span id="avgBpmDisplay">--</span><span class="metric-unit">BPM</span></div>
-        </div>
-        <div class="metric-card">
-            <div class="metric-label">Signal AC Peak</div>
-            <div class="metric-value"><span id="acDisplay">--</span><span class="metric-unit">units</span></div>
-        </div>
-        <div class="metric-card">
-            <div class="metric-label">Vascular Rhythm</div>
-            <div class="metric-value" style="font-size: 1.1rem; color: var(--accent-cyan);" id="statusDisplay">IDLE</div>
-        </div>
+  <div id="authCard" class="card" style="display: none;">
+    <h4 id="authFormTitle" style="margin-bottom: 1rem;">AUTHENTICATE SESSION</h4>
+    <input type="text" id="authUsername" placeholder="USERNAME" />
+    <input type="email" id="authEmail" placeholder="EMAIL (REGISTER ONLY)" style="display: none;" />
+    <input type="password" id="authPassword" placeholder="PASSWORD" />
+    <div style="display: flex; gap: 0.5rem;">
+      <button class="btn" id="submitAuthBtn" onclick="handleAuthSubmit()">SUBMIT</button>
+      <button class="btn" onclick="toggleAuthMode()">SWITCH MODE</button>
+    </div>
+  </div>
+
+  <div class="card">
+    <div style="display: flex; justify-content: space-between; align-items: center;">
+      <button class="btn" onclick="connectBLE()">PAIR BLE SENSOR</button>
+      <div style="display: flex; align-items: center; gap: 8px;">
+        <span class="pulse-dot" id="liveDot"></span>
+        <span id="bleStatus" style="color: var(--text-muted); font-size: 0.8rem;">DISCONNECTED</span>
+      </div>
     </div>
 
-    <div class="card-canvas">
-        <div class="canvas-header">
-            <span>PPG OSCILLOSCOPE TRACE (60 FPS)</span>
-            <span id="syncIndicator">RATE GATE: 10s / 12Δ</span>
-        </div>
-        <canvas id="ppgCanvas"></canvas>
+    <div class="grid-3">
+      <div class="metric-box">
+        <div class="metric-label">Pulse Rate <span>[BPM]</span></div>
+        <div class="metric-value" id="bpmVal">--</div>
+      </div>
+      <div class="metric-box">
+        <div class="metric-label">Signal Peak AC <span>[RAW]</span></div>
+        <div class="metric-value" id="acVal">--</div>
+      </div>
+      <div class="metric-box">
+        <div class="metric-label">Classification <span>[AI/RULE]</span></div>
+        <div class="metric-value" id="statusVal" style="font-size: 1.25rem;">--</div>
+      </div>
     </div>
 
-    <div class="log-section">
-        <div style="display: flex; justify-content: space-between; align-items: center;">
-            <span class="metric-label">Telemetry Ingest Log (Atlas Cloud)</span>
-            <button id="refreshLogsBtn" style="padding: 4px 10px; font-size: 0.75rem;">Fetch Logs</button>
-        </div>
-        <div class="log-table-wrapper">
-            <table>
-                <thead>
-                    <tr>
-                        <th>Timestamp (UTC)</th>
-                        <th>Mean BPM</th>
-                        <th>Peak AC</th>
-                        <th>Classification</th>
-                    </tr>
-                </thead>
-                <tbody id="logsTableBody">
-                    <tr><td colspan="4" style="text-align: center; color: var(--text-muted);">No records fetched.</td></tr>
-                </tbody>
-            </table>
-        </div>
+    <div class="waveform-wrapper">
+      <div class="scanner"></div>
+      <canvas id="scopeCanvas"></canvas>
     </div>
-</div>
+  </div>
 
-<!-- Auth Modal -->
-<div id="authModal" class="modal">
-    <div class="modal-content">
-        <h3 id="modalTitle">Account Access</h3>
-        <input type="text" id="usernameInput" placeholder="Username" autocomplete="off" />
-        <input type="email" id="emailInput" placeholder="Email (Registration only)" style="display: none;" />
-        <input type="password" id="passwordInput" placeholder="Password" />
-        <button id="submitAuthBtn" class="primary">Sign In</button>
-        <button id="switchModeBtn" style="background: transparent; border: none; font-size: 0.8rem; color: var(--accent-cyan);">Need an account? Register</button>
-        <button id="closeModalBtn">Cancel</button>
+  <div class="card">
+    <div style="display: flex; justify-content: space-between; align-items: center;">
+      <span style="font-weight: bold; text-transform: uppercase;">Cloud Database Logs</span>
+      <button class="btn" onclick="fetchLogs()">FETCH LOGS</button>
     </div>
+    <table>
+      <thead>
+        <tr>
+          <th>Timestamp (UTC)</th>
+          <th>BPM</th>
+          <th>Peak AC</th>
+          <th>Status</th>
+        </tr>
+      </thead>
+      <tbody id="logsTableBody">
+        <tr><td colspan="4" style="text-align: center; color: var(--text-muted);">NO RECORDS LOADED</td></tr>
+      </tbody>
+    </table>
+  </div>
 </div>
 
 <script>
-    const API_BASE = "https://vitals-backend-api.onrender.com";
-    const BLE_SERVICE_UUID = "4fafc201-1fb5-459e-8fcc-c5c9c331914b";
-    const BLE_CHAR_UUID = "beb5483e-36e1-4688-b7f5-ea07361b26a8";
+  const BACKEND_URL = "https://vitals-backend-api.onrender.com";
+  const SERVICE_UUID = "4fafc201-1fb5-459e-8fcc-c5c9c331914b";
+  const CHAR_UUID = "beb5483e-36e1-4688-b7f5-ea07361b26a8";
 
-    // Telemetry & Buffer State
-    let bpmBuffer = [];
-    let acBuffer = [];
-    const BUFFER_SIZE = 5;
-    let lastLoggedTime = 0;
-    let lastLoggedBpm = 0;
-    const LOG_INTERVAL_MS = 10000;
-    const SPIKE_THRESHOLD_BPM = 12;
+  let token = localStorage.getItem("access_token") || null;
+  let currentUser = localStorage.getItem("username") || null;
+  let isRegisterMode = false;
+  let lastLogTime = 0;
 
-    // Oscilloscope State
-    const canvas = document.getElementById("ppgCanvas");
-    const ctx = canvas.getContext("2d");
-    let circularBuffer = new Array(300).fill(0);
-    let phase = 0;
-    let currentBpm = 0;
-    let currentAc = 0;
-    let isConnected = false;
+  let currentBPM = 0;
+  let currentAC = 0;
+  let isConnected = false;
 
-    // Canvas Resizing
-    function resizeCanvas() {
-        canvas.width = canvas.parentElement.clientWidth - 24;
-        canvas.height = 200;
+  const canvas = document.getElementById("scopeCanvas");
+  const ctx = canvas.getContext("2d");
+  const maxPoints = 300;
+  let waveBuffer = new Array(maxPoints).fill(0);
+  let pulsePhase = 0;
+
+  function resizeCanvas() {
+    canvas.width = canvas.parentElement.clientWidth;
+    canvas.height = canvas.parentElement.clientHeight;
+  }
+  window.addEventListener("resize", resizeCanvas);
+  resizeCanvas();
+
+  function getPPGPoint() {
+    if (!isConnected || currentBPM <= 30) return Math.sin(Date.now() / 200) * 2;
+    const freq = currentBPM / 60;
+    pulsePhase += (freq * 2 * Math.PI) / 60;
+    if (pulsePhase > 2 * Math.PI) pulsePhase -= 2 * Math.PI;
+
+    const t = pulsePhase;
+    const amp = Math.max(currentAC, 35);
+    const p1 = Math.exp(-Math.pow((t - 1.2) / 0.45, 2)) * 1.0;
+    const p2 = Math.exp(-Math.pow((t - 2.4) / 0.55, 2)) * 0.35;
+    return (p1 + p2) * amp + (Math.random() * 1.5 - 0.75);
+  }
+
+  function renderScope() {
+    waveBuffer.push(getPPGPoint());
+    waveBuffer.shift();
+
+    ctx.fillStyle = "rgba(2, 2, 2, 0.9)";
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    ctx.strokeStyle = "#161616";
+    ctx.lineWidth = 1;
+    for (let x = 0; x < canvas.width; x += 30) {
+      ctx.beginPath();
+      ctx.moveTo(x, 0); ctx.lineTo(x, canvas.height); ctx.stroke();
     }
-    window.addEventListener("resize", resizeCanvas);
-    resizeCanvas();
+    for (let y = 0; y < canvas.height; y += 30) {
+      ctx.beginPath();
+      ctx.moveTo(0, y); ctx.lineTo(canvas.width, y); ctx.stroke();
+    }
 
-    // Oscilloscope Synthesis & Rendering Loop
-    function renderOscilloscope() {
-        ctx.fillStyle = "#010409";
-        ctx.fillRect(0, 0, canvas.width, canvas.height);
+    let min = Math.min(...waveBuffer);
+    let max = Math.max(...waveBuffer);
+    let range = max - min;
+    if (range < 15) range = 15;
 
-        // Draw background grid lines
-        ctx.strokeStyle = "#0d1f36";
-        ctx.lineWidth = 1;
-        ctx.beginPath();
-        for (let x = 0; x < canvas.width; x += 40) {
-            ctx.moveTo(x, 0);
-            ctx.lineTo(x, canvas.height);
-        }
-        for (let y = 0; y < canvas.height; y += 40) {
-            ctx.moveTo(0, y);
-            ctx.lineTo(canvas.width, y);
-        }
-        ctx.stroke();
+    ctx.strokeStyle = "#ffffff";
+    ctx.lineWidth = 2.2;
+    ctx.shadowBlur = 8;
+    ctx.shadowColor = "#ffffff";
+    ctx.beginPath();
 
-        if (isConnected && currentBpm >= 40) {
-            // Reconstruct physiological PPG curve (Systolic peak + Dicrotic notch)
-            const dPhase = (2 * Math.PI * currentBpm) / (60 * 60);
-            phase = (phase + dPhase) % (2 * Math.PI);
+    const step = canvas.width / (maxPoints - 1);
+    const padding = 25;
+    const usableHeight = canvas.height - padding * 2;
 
-            const amp = Math.max(currentAc, 35);
-            const systolic = Math.exp(-Math.pow((phase - 1.2) / 0.45, 2));
-            const dicrotic = 0.35 * Math.exp(-Math.pow((phase - 2.4) / 0.55, 2));
-            const noise = (Math.random() - 0.5) * 2;
-            const signal = amp * (systolic + dicrotic) + noise;
+    for (let i = 0; i < maxPoints; i++) {
+      const norm = (waveBuffer[i] - min) / range;
+      const y = canvas.height - padding - (norm * usableHeight);
+      const x = i * step;
+      if (i === 0) ctx.moveTo(x, y);
+      else ctx.lineTo(x, y);
+    }
+    ctx.stroke();
+    ctx.shadowBlur = 0;
+    requestAnimationFrame(renderScope);
+  }
+  requestAnimationFrame(renderScope);
 
-            circularBuffer.push(signal);
-            circularBuffer.shift();
+  updateAuthUI();
 
-            // Heart icon pulse
-            if (phase < 0.2) {
-                document.getElementById("heartIcon").classList.add("pulsing");
-            } else {
-                document.getElementById("heartIcon").classList.remove("pulsing");
-            }
+  function toggleAuthModal() {
+    const card = document.getElementById("authCard");
+    card.style.display = card.style.display === "none" ? "block" : "none";
+  }
+
+  function toggleAuthMode() {
+    isRegisterMode = !isRegisterMode;
+    document.getElementById("authFormTitle").innerText = isRegisterMode ? "REGISTER ACCOUNT" : "AUTHENTICATE SESSION";
+    document.getElementById("authEmail").style.display = isRegisterMode ? "block" : "none";
+  }
+
+  async function handleAuthSubmit() {
+    const u = document.getElementById("authUsername").value.trim();
+    const p = document.getElementById("authPassword").value.trim();
+    const e = document.getElementById("authEmail").value.trim();
+
+    if (!u || !p) return alert("Enter username and password.");
+
+    try {
+      if (isRegisterMode) {
+        const res = await fetch(`${BACKEND_URL}/api/auth/register`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ username: u, email: e, password: p })
+        });
+        if (res.ok) {
+          alert("Registration complete. Please sign in.");
+          toggleAuthMode();
         } else {
-            // Idle flatline with random electrical floor noise
-            circularBuffer.push((Math.random() - 0.5) * 1.5);
-            circularBuffer.shift();
-            document.getElementById("heartIcon").classList.remove("pulsing");
+          const err = await res.json();
+          alert(err.detail || "Registration failed");
         }
+      } else {
+        const form = new URLSearchParams();
+        form.append("username", u);
+        form.append("password", p);
 
-        // Dynamic Viewport Auto-Scaling
-        const minVal = Math.min(...circularBuffer);
-        const maxVal = Math.max(...circularBuffer);
-        const range = (maxVal - minVal) + 15;
-        const pad = 25;
-
-        ctx.strokeStyle = "#58a6ff";
-        ctx.shadowBlur = 8;
-        ctx.shadowColor = "#58a6ff";
-        ctx.lineWidth = 2;
-        ctx.beginPath();
-
-        const step = canvas.width / (circularBuffer.length - 1);
-        for (let i = 0; i < circularBuffer.length; i++) {
-            const normY = (circularBuffer[i] - minVal) / range;
-            const y = canvas.height - pad - normY * (canvas.height - 2 * pad);
-            const x = i * step;
-            if (i === 0) ctx.moveTo(x, y);
-            else ctx.lineTo(x, y);
-        }
-        ctx.stroke();
-        ctx.shadowBlur = 0;
-
-        requestAnimationFrame(renderOscilloscope);
-    }
-    requestAnimationFrame(renderOscilloscope);
-
-    // Web Bluetooth GATT Connection
-    document.getElementById("scanBtn").addEventListener("click", async () => {
-        if (!navigator.bluetooth) {
-            alert("Web Bluetooth API is disabled. Follow the browser instructions to enable it.");
-            return;
-        }
-
-        try {
-            const device = await navigator.bluetooth.requestDevice({
-                filters: [{ services: [BLE_SERVICE_UUID] }]
-            });
-
-            const server = await device.gatt.connect();
-            const service = await server.getPrimaryService(BLE_SERVICE_UUID);
-            const characteristic = await service.getCharacteristic(BLE_CHAR_UUID);
-
-            await characteristic.startNotifications();
-            characteristic.addEventListener("characteristicvaluechanged", onCharacteristicValueChanged);
-
-            isConnected = true;
-            document.getElementById("connDot").classList.add("connected");
-            document.getElementById("scanBtn").innerText = "Sensor Active";
-            document.getElementById("statusDisplay").innerText = "SYNCED";
-
-            device.addEventListener("gattserverdisconnected", () => {
-                isConnected = false;
-                document.getElementById("connDot").classList.remove("connected");
-                document.getElementById("scanBtn").innerText = "Pair BLE Sensor";
-                document.getElementById("statusDisplay").innerText = "DISCONNECTED";
-            });
-        } catch (err) {
-            console.error("[BLE Error]", err);
-        }
-    });
-
-    // Ingestion & Gating Handler
-    function onCharacteristicValueChanged(event) {
-        const rawString = new TextDecoder().decode(event.target.value);
-        try {
-            const data = JSON.parse(rawString);
-            const rawBpm = parseFloat(data.bpm) || 0;
-            const rawAc = parseFloat(data.peak_ac) || 0;
-            const status = data.status || "NORMAL";
-
-            currentBpm = rawBpm;
-            currentAc = rawAc;
-
-            document.getElementById("bpmDisplay").innerText = rawBpm > 0 ? rawBpm.toFixed(1) : "--";
-            document.getElementById("acDisplay").innerText = rawAc > 0 ? rawAc.toFixed(1) : "--";
-            document.getElementById("statusDisplay").innerText = status;
-
-            processAndLogTelemetry(rawBpm, rawAc, status);
-        } catch (e) {
-            console.error("[Parse Error]", e);
-        }
-    }
-
-    // Rolling Average Calculation & Database Dispatch
-    async function processAndLogTelemetry(rawBpm, rawAc, status) {
-        // Drop invalid noise readings
-        if (rawBpm < 40.0 || rawAc < 1.0) return;
-
-        bpmBuffer.push(rawBpm);
-        acBuffer.push(rawAc);
-        if (bpmBuffer.length > BUFFER_SIZE) bpmBuffer.shift();
-        if (acBuffer.length > BUFFER_SIZE) acBuffer.shift();
-
-        const avgBpm = Number((bpmBuffer.reduce((a, b) => a + b, 0) / bpmBuffer.length).toFixed(1));
-        const avgAc = Number((acBuffer.reduce((a, b) => a + b, 0) / acBuffer.length).toFixed(1));
-
-        document.getElementById("avgBpmDisplay").innerText = avgBpm.toFixed(1);
-
-        const now = Date.now();
-        const timeElapsed = now - lastLoggedTime;
-        const isTimerDue = timeElapsed >= LOG_INTERVAL_MS;
-        const isSpike = Math.abs(avgBpm - lastLoggedBpm) >= SPIKE_THRESHOLD_BPM;
-        const isAnomaly = status.toUpperCase() !== "NORMAL" && status.toUpperCase() !== "NORMAL SINUS";
-
-        if (isTimerDue || isSpike || isAnomaly) {
-            await sendLogToBackend(avgBpm, avgAc, status);
-            lastLoggedTime = now;
-            lastLoggedBpm = avgBpm;
-        }
-    }
-
-    // REST POST Payload to FastAPI
-    async function sendLogToBackend(avgBpm, avgAc, status) {
-        const token = localStorage.getItem("token");
-        if (!token) return;
-
-        try {
-            await fetch(`${API_BASE}/api/log`, {
-                method: "POST",
-                headers: {
-                    "Content-Type": "application/json",
-                    "Authorization": `Bearer ${token}`
-                },
-                body: JSON.stringify({
-                    bpm: avgBpm,
-                    peak_ac: avgAc,
-                    status: status
-                })
-            });
-        } catch (err) {
-            console.error("[Fetch Error]", err);
-        }
-    }
-
-    // Historical Logs Fetch
-    document.getElementById("refreshLogsBtn").addEventListener("click", fetchLogs);
-
-    async function fetchLogs() {
-        const token = localStorage.getItem("token");
-        if (!token) {
-            alert("Please log in first to fetch your saved database logs.");
-            return;
-        }
-
-        try {
-            const res = await fetch(`${API_BASE}/api/logs?limit=10`, {
-                headers: { "Authorization": `Bearer ${token}` }
-            });
-            if (!res.ok) throw new Error("Failed to fetch logs");
-            const logs = await res.json();
-
-            const tbody = document.getElementById("logsTableBody");
-            tbody.innerHTML = "";
-            if (logs.length === 0) {
-                tbody.innerHTML = `<tr><td colspan="4" style="text-align: center; color: var(--text-muted);">No records found.</td></tr>`;
-                return;
-            }
-
-            logs.forEach(l => {
-                const tr = document.createElement("tr");
-                tr.innerHTML = `
-                    <td>${l.timestamp}</td>
-                    <td><strong>${l.bpm}</strong></td>
-                    <td>${l.peak_ac}</td>
-                    <td>${l.status}</td>
-                `;
-                tbody.appendChild(tr);
-            });
-        } catch (e) {
-            console.error(e);
-        }
-    }
-
-    // Modal & Authentication Workflow
-    let isRegisterMode = false;
-    const authModal = document.getElementById("authModal");
-    const authBtn = document.getElementById("authBtn");
-    const switchModeBtn = document.getElementById("switchModeBtn");
-    const emailInput = document.getElementById("emailInput");
-    const modalTitle = document.getElementById("modalTitle");
-    const submitAuthBtn = document.getElementById("submitAuthBtn");
-
-    function updateAuthStatus() {
-        const token = localStorage.getItem("token");
-        const user = localStorage.getItem("username");
-        if (token && user) {
-            authBtn.innerText = `Sign Out (${user})`;
+        const res = await fetch(`${BACKEND_URL}/api/auth/login`, {
+          method: "POST",
+          headers: { "Content-Type": "application/x-www-form-urlencoded" },
+          body: form
+        });
+        if (res.ok) {
+          const data = await res.json();
+          token = data.access_token;
+          currentUser = data.username;
+          localStorage.setItem("access_token", token);
+          localStorage.setItem("username", currentUser);
+          toggleAuthModal();
+          updateAuthUI();
+          fetchLogs();
         } else {
-            authBtn.innerText = "Login / Register";
+          alert("Invalid credentials.");
         }
+      }
+    } catch (err) {
+      alert("Backend unreachable. Ensure Render instance is active.");
     }
-    updateAuthStatus();
+  }
 
-    authBtn.addEventListener("click", () => {
-        if (localStorage.getItem("token")) {
-            localStorage.removeItem("token");
-            localStorage.removeItem("username");
-            updateAuthStatus();
-            alert("Signed out successfully.");
-        } else {
-            authModal.style.display = "flex";
-        }
+  function logout() {
+    token = null;
+    currentUser = null;
+    localStorage.removeItem("access_token");
+    localStorage.removeItem("username");
+    updateAuthUI();
+  }
+
+  function updateAuthUI() {
+    const status = document.getElementById("authStatus");
+    const btn = document.getElementById("authBtn");
+    if (token && currentUser) {
+      status.innerText = `SESSION: ACTIVE [${currentUser.toUpperCase()}]`;
+      btn.innerText = "LOGOUT";
+      btn.onclick = logout;
+      fetchLogs();
+    } else {
+      status.innerText = "STATUS: UNAUTHORIZED";
+      btn.innerText = "LOGIN / REGISTER";
+      btn.onclick = toggleAuthModal;
+    }
+  }
+
+  async function connectBLE() {
+    if (!token) {
+      alert("Authenticate before pairing sensor.");
+      toggleAuthModal();
+      return;
+    }
+    try {
+      const device = await navigator.bluetooth.requestDevice({
+        filters: [{ namePrefix: "ESP32" }],
+        optionalServices: [SERVICE_UUID]
+      });
+      document.getElementById("bleStatus").innerText = "CONNECTING...";
+      const server = await device.gatt.connect();
+      const service = await server.getPrimaryService(SERVICE_UUID);
+      const char = await service.getCharacteristic(CHAR_UUID);
+
+      await char.startNotifications();
+      char.addEventListener("characteristicvaluechanged", handleBLEData);
+      
+      isConnected = true;
+      document.getElementById("bleStatus").innerText = "STREAMING: " + device.name.toUpperCase();
+      document.getElementById("liveDot").classList.add("pulsing");
+    } catch (err) {
+      document.getElementById("bleStatus").innerText = "ERROR: " + err.message.toUpperCase();
+      isConnected = false;
+      document.getElementById("liveDot").classList.remove("pulsing");
+    }
+  }
+
+// --- Efficient Aggregated Logging System ---
+const LOG_INTERVAL_MS = 10000; // Log clean average every 10 seconds
+let lastLogTimestamp = 0;
+let lastPersistedBPM = null;
+
+// Rolling window to smooth readings and discard transient outliers
+const sampleWindow = [];
+const WINDOW_SIZE = 5;
+
+function handleBLEData(event) {
+  const raw = new TextDecoder().decode(event.target.value);
+  try {
+    const data = JSON.parse(raw);
+    const bpm = parseFloat(data.bpm) || 0.0;
+    const ac = parseFloat(data.peak_ac) || 0.0;
+    const statusText = (data.status || "NORMAL").trim();
+
+    // 1. Always update real-time visual displays & oscilloscope
+    currentBPM = bpm;
+    currentAC = ac;
+    document.getElementById("bpmVal").innerText = bpm > 0 ? bpm.toFixed(1) : "--";
+    document.getElementById("acVal").innerText = ac > 0 ? ac.toFixed(1) : "--";
+    document.getElementById("statusVal").innerText = statusText.toUpperCase();
+
+    if (bpm > 40) {
+      const pulseInterval = (60 / bpm).toFixed(2);
+      document.getElementById("liveDot").style.animationDuration = `${pulseInterval}s`;
+    }
+
+    // 2. Reject zero or non-contact readings (Finger removed)
+    if (bpm < 40 || ac < 1.0) {
+      sampleWindow.length = 0; // Clear window when finger is off
+      return;
+    }
+
+    // 3. Push to rolling average buffer
+    sampleWindow.push({ bpm, ac, statusText });
+    if (sampleWindow.length > WINDOW_SIZE) {
+      sampleWindow.shift();
+    }
+
+    const now = Date.now();
+    const elapsed = now - lastLogTimestamp;
+
+    // 4. Calculate smoothed values from current buffer
+    const avgBPM = sampleWindow.reduce((acc, s) => acc + s.bpm, 0) / sampleWindow.length;
+    const avgAC = sampleWindow.reduce((acc, s) => acc + s.ac, 0) / sampleWindow.length;
+    const latestStatus = sampleWindow[sampleWindow.length - 1].statusText;
+
+    // 5. Evaluate logging triggers
+    const isFirstLog = lastPersistedBPM === null;
+    const isTimerDue = elapsed >= LOG_INTERVAL_MS;
+    const isSpike = lastPersistedBPM !== null && Math.abs(avgBPM - lastPersistedBPM) >= 12;
+    const isAnomaly = !["NORMAL", "NORMAL SINUS"].includes(latestStatus.toUpperCase());
+
+    if (isFirstLog || isTimerDue || isSpike || isAnomaly) {
+      lastLogTimestamp = now;
+      lastPersistedBPM = avgBPM;
+
+      sendLog({
+        bpm: parseFloat(avgBPM.toFixed(1)),
+        peak_ac: parseFloat(avgAC.toFixed(1)),
+        status: latestStatus
+      });
+    }
+  } catch (err) {
+    console.warn("BLE packet parsing error:", raw);
+  }
+}
+
+async function sendLog(payload) {
+  if (!token) return;
+
+  try {
+    const res = await fetch(`${BACKEND_URL}/api/log`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${token}`
+      },
+      body: JSON.stringify(payload)
     });
 
-    document.getElementById("closeModalBtn").addEventListener("click", () => {
-        authModal.style.display = "none";
-    });
-
-    switchModeBtn.addEventListener("click", () => {
-        isRegisterMode = !isRegisterMode;
-        if (isRegisterMode) {
-            modalTitle.innerText = "Register Account";
-            emailInput.style.display = "block";
-            submitAuthBtn.innerText = "Create Account";
-            switchModeBtn.innerText = "Existing user? Sign In";
-        } else {
-            modalTitle.innerText = "Account Access";
-            emailInput.style.display = "none";
-            submitAuthBtn.innerText = "Sign In";
-            switchModeBtn.innerText = "Need an account? Register";
+    if (res.ok) {
+      console.log("%c[DATABASE LOG SAVED]", "color: #22c55e", payload);
+      fetchLogs();
+    } else {
+      const err = await res.json();
+      console.error("[DATABASE LOG FAILED]", res.status, err);
+    }
+  } catch (err) {
+    console.error("[NETWORK ERROR LOGGING VITALS]", err);
+  }
+}
+  async function fetchLogs() {
+    if (!token) return;
+    try {
+      const res = await fetch(`${BACKEND_URL}/api/logs?limit=10`, {
+        headers: { "Authorization": `Bearer ${token}` }
+      });
+      if (res.ok) {
+        const logs = await res.json();
+        const tbody = document.getElementById("logsTableBody");
+        tbody.innerHTML = "";
+        if (logs.length === 0) {
+          tbody.innerHTML = `<tr><td colspan="4" style="text-align:center;">NO LOGS FOUND</td></tr>`;
+          return;
         }
-    });
-
-    submitAuthBtn.addEventListener("click", async () => {
-        const username = document.getElementById("usernameInput").value.trim();
-        const password = document.getElementById("passwordInput").value.trim();
-        const email = emailInput.value.trim();
-
-        if (!username || !password || (isRegisterMode && !email)) {
-            alert("Please fill in all required fields.");
-            return;
-        }
-
-        try {
-            if (isRegisterMode) {
-                const regRes = await fetch(`${API_BASE}/api/auth/register`, {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({ username, email, password })
-                });
-                if (!regRes.ok) {
-                    const err = await regRes.json();
-                    alert(err.detail || "Registration failed.");
-                    return;
-                }
-                alert("Registration complete. Logging in...");
-            }
-
-            const formData = new URLSearchParams();
-            formData.append("username", username);
-            formData.append("password", password);
-
-            const loginRes = await fetch(`${API_BASE}/api/auth/login`, {
-                method: "POST",
-                headers: { "Content-Type": "application/x-www-form-urlencoded" },
-                body: formData
-            });
-
-            if (!loginRes.ok) {
-                const err = await loginRes.json();
-                alert(err.detail || "Authentication failed.");
-                return;
-            }
-
-            const tokenData = await loginRes.json();
-            localStorage.setItem("token", tokenData.access_token);
-            localStorage.setItem("username", username);
-
-            authModal.style.display = "none";
-            updateAuthStatus();
-            fetchLogs();
-        } catch (e) {
-            console.error(e);
-            alert("Network error connecting to authentication server.");
-        }
-    });
+        logs.forEach(row => {
+          const tr = document.createElement("tr");
+          tr.innerHTML = `
+            <td>${row.timestamp}</td>
+            <td>${row.bpm}</td>
+            <td>${row.peak_ac}</td>
+            <td>${row.status}</td>
+          `;
+          tbody.appendChild(tr);
+        });
+      }
+    } catch (err) {
+      console.error(err);
+    }
+  }
 </script>
 </body>
 </html>
