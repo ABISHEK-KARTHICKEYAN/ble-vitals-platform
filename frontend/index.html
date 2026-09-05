@@ -488,18 +488,17 @@
       document.getElementById("liveDot").classList.remove("pulsing");
     }
   }
-
 // ==========================================
-  // HARDENED LOGGING ENGINE (AUTO-COMMIT FIX)
+  // DECOUPLED INDEPENDENT LOGGING ENGINE
   // ==========================================
-  const LOG_INTERVAL_MS = 8000; // 8-second periodic log
-  let lastLogTimestamp = 0;     // Start at 0 so first packet triggers immediately
+  const LOG_INTERVAL_MS = 8000;
   let lastPersistedBPM = 0;
-  let isLoggingInProgress = false;
+  let isSending = false;
 
   const sampleWindow = [];
   const WINDOW_SIZE = 5;
 
+  // 1. Ingestion: Solely updates buffer & UI (zero async delays here)
   function handleBLEData(event) {
     const raw = new TextDecoder().decode(event.target.value);
     try {
@@ -508,7 +507,6 @@
       const ac = parseFloat(data.peak_ac) || 0.0;
       const statusText = (data.status || "NORMAL").trim();
 
-      // Update UI real-time values immediately
       currentBPM = bpm;
       currentAC = ac;
       document.getElementById("bpmVal").innerText = bpm > 0 ? bpm.toFixed(1) : "--";
@@ -520,58 +518,56 @@
         document.getElementById("liveDot").style.animationDuration = `${pulseInterval}s`;
       }
 
-      // Ignore clear off-finger readings
+      // Ignore zero or non-contact noise
       if (bpm < 35.0 || ac < 0.2) {
         return;
       }
 
-      // Buffer valid readings
-      sampleWindow.push({ bpm, ac, statusText });
+      // Keep sample buffer populated
+      sampleWindow.push({ bpm, ac, statusText, time: Date.now() });
       if (sampleWindow.length > WINDOW_SIZE) sampleWindow.shift();
 
+      // Instant spike or anomaly detection
       const avgBPM = sampleWindow.reduce((acc, s) => acc + s.bpm, 0) / sampleWindow.length;
-      const avgAC = sampleWindow.reduce((acc, s) => acc + s.ac, 0) / sampleWindow.length;
-      const latestStatus = sampleWindow[sampleWindow.length - 1].statusText;
-
-      const now = Date.now();
-      const elapsed = now - lastLogTimestamp;
-
-      // Trigger conditions:
-      // 1. Initial log: Fired on the very first valid sample
-      // 2. Timer: Fired every 8 seconds
-      // 3. Spike: Sudden swing of >= 12 BPM
-      // 4. Anomaly: AI or rule-based flag
-      const isInitial = (lastLogTimestamp === 0);
-      const isTimerDue = elapsed >= LOG_INTERVAL_MS;
       const isSpike = lastPersistedBPM > 0 && Math.abs(avgBPM - lastPersistedBPM) >= 12;
-      const isAnomaly = !["NORMAL", "NORMAL SINUS"].includes(latestStatus.toUpperCase());
+      const isAnomaly = !["NORMAL", "NORMAL SINUS"].includes(statusText.toUpperCase());
 
-      if ((isInitial || isTimerDue || isSpike || isAnomaly) && !isLoggingInProgress) {
-        console.log(`%c[INGEST TRIGGER] Initial:${isInitial} | Timer:${isTimerDue} | Spike:${isSpike} | Anomaly:${isAnomaly}`, "color: yellow;");
-        
-        lastLogTimestamp = now;
-        lastPersistedBPM = avgBPM;
-
-        sendLog({
-          bpm: parseFloat(avgBPM.toFixed(1)),
-          peak_ac: parseFloat(avgAC.toFixed(1)),
-          status: latestStatus
-        });
+      if ((isSpike || isAnomaly) && !isSending) {
+        dispatchPayload(avgBPM, ac, statusText, isAnomaly ? "ANOMALY" : "SPIKE");
       }
     } catch (err) {
       console.warn("BLE parse error:", raw);
     }
   }
 
-  async function sendLog(payload) {
-    if (!token) {
-      console.warn("[PERSISTENCE SKIPPED] User not logged in; session token missing.");
-      return;
-    }
+  // 2. Independent Timer: Fires every 8 seconds without fail
+  setInterval(() => {
+    if (!isConnected || sampleWindow.length === 0 || isSending) return;
 
-    isLoggingInProgress = true;
+    // Reject stale data older than 4 seconds
+    const latestSample = sampleWindow[sampleWindow.length - 1];
+    if (Date.now() - latestSample.time > 4000) return;
+
+    const avgBPM = sampleWindow.reduce((acc, s) => acc + s.bpm, 0) / sampleWindow.length;
+    const avgAC = sampleWindow.reduce((acc, s) => acc + s.ac, 0) / sampleWindow.length;
+
+    dispatchPayload(avgBPM, avgAC, latestSample.statusText, "PERIODIC_8S");
+  }, LOG_INTERVAL_MS);
+
+  // 3. Robust Dispatcher
+  async function dispatchPayload(bpm, ac, statusText, triggerSource) {
+    if (!token) return;
+
+    isSending = true;
+    const payload = {
+      bpm: parseFloat(bpm.toFixed(1)),
+      peak_ac: parseFloat(ac.toFixed(1)),
+      status: statusText
+    };
+
+    console.log(`%c[PERSISTING] Trigger: ${triggerSource}`, "color: #38bdf8; font-weight: bold;", payload);
+
     try {
-      console.log("[DISPATCHING LOG]", payload);
       const res = await fetch(`${BACKEND_URL}/api/log`, {
         method: "POST",
         headers: {
@@ -582,19 +578,34 @@
       });
 
       if (res.ok) {
-        lastLogTimestamp = Date.now();
         lastPersistedBPM = payload.bpm;
         console.log("%c[DATABASE LOG COMMITTED]", "color: #22c55e; font-weight: bold;", payload);
-        fetchLogs();
+        renderLatestRow(payload);
       } else {
-        const err = await res.json().catch(() => ({ detail: "Unknown server error" }));
-        console.error("[DATABASE LOG REJECTED]", res.status, err);
+        const err = await res.json().catch(() => ({}));
+        console.error("[LOG REJECTED]", res.status, err);
       }
     } catch (err) {
-      console.error("[NETWORK ERROR POSTING VITALS]", err);
+      console.error("[NETWORK POST ERROR]", err);
     } finally {
-      isLoggingInProgress = false;
+      isSending = false;
     }
+  }
+
+  // Fast UI append without costly full-table network re-fetching
+  function renderLatestRow(row) {
+    const tbody = document.getElementById("logsTableBody");
+    if (tbody.innerText.includes("NO RECORDS")) tbody.innerHTML = "";
+
+    const tr = document.createElement("tr");
+    const nowUtc = new Date().toISOString().replace("T", " ").substring(0, 19);
+    tr.innerHTML = `
+      <td>${nowUtc}</td>
+      <td><strong>${row.bpm}</strong></td>
+      <td>${row.peak_ac}</td>
+      <td>${row.status}</td>
+    `;
+    tbody.insertBefore(tr, tbody.firstChild);
   }
 
   async function fetchLogs() {
