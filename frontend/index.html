@@ -422,54 +422,73 @@
     }
   }
 
-  // --- Optimized Logging Config ---
-const NORMAL_LOG_INTERVAL_MS = 15000; // Log valid steady vitals every 15s (instead of 3s)
-let lastLoggedBPM = 0;
+// --- Efficient Aggregated Logging System ---
+const LOG_INTERVAL_MS = 10000; // Log clean average every 10 seconds
+let lastLogTimestamp = 0;
+let lastPersistedBPM = null;
+
+// Rolling window to smooth readings and discard transient outliers
+const sampleWindow = [];
+const WINDOW_SIZE = 5;
 
 function handleBLEData(event) {
   const raw = new TextDecoder().decode(event.target.value);
   try {
     const data = JSON.parse(raw);
-    const parsedBPM = parseFloat(data.bpm) || 0;
-    const parsedAC = parseFloat(data.peak_ac) || 0;
-    const parsedStatus = String(data.status || "IDLE").toUpperCase();
+    const bpm = parseFloat(data.bpm) || 0.0;
+    const ac = parseFloat(data.peak_ac) || 0.0;
+    const statusText = (data.status || "NORMAL").trim();
 
-    // Always update the live UI / oscilloscope at full sensor refresh speed
-    currentBPM = parsedBPM;
-    currentAC = parsedAC;
-    document.getElementById("bpmVal").innerText = parsedBPM > 0 ? parsedBPM : "--";
-    document.getElementById("acVal").innerText = parsedAC > 0 ? parsedAC : "--";
-    document.getElementById("statusVal").innerText = parsedStatus;
+    // 1. Always update real-time visual displays & oscilloscope
+    currentBPM = bpm;
+    currentAC = ac;
+    document.getElementById("bpmVal").innerText = bpm > 0 ? bpm.toFixed(1) : "--";
+    document.getElementById("acVal").innerText = ac > 0 ? ac.toFixed(1) : "--";
+    document.getElementById("statusVal").innerText = statusText.toUpperCase();
 
-    if (currentBPM > 40) {
-      const pulseInterval = (60 / currentBPM).toFixed(2);
+    if (bpm > 40) {
+      const pulseInterval = (60 / bpm).toFixed(2);
       document.getElementById("liveDot").style.animationDuration = `${pulseInterval}s`;
     }
 
-    // --- Database Ingestion Filter ---
-    // 1. Filter out zeroes or idle non-readings (no finger placed)
-    if (parsedBPM <= 35 || parsedAC <= 5) {
-      return; 
+    // 2. Reject zero or non-contact readings (Finger removed)
+    if (bpm < 40 || ac < 1.0) {
+      sampleWindow.length = 0; // Clear window when finger is off
+      return;
+    }
+
+    // 3. Push to rolling average buffer
+    sampleWindow.push({ bpm, ac, statusText });
+    if (sampleWindow.length > WINDOW_SIZE) {
+      sampleWindow.shift();
     }
 
     const now = Date.now();
-    const timeSinceLastLog = now - lastLogTime;
-    
-    // 2. Significant delta trigger: log instantly if BPM fluctuates by more than 10 BPM
-    const hasSignificantDeviation = Math.abs(parsedBPM - lastLoggedBPM) >= 10;
-    const isCriticalStatus = parsedStatus !== "NORMAL" && parsedStatus !== "NORMAL SINUS";
+    const elapsed = now - lastLogTimestamp;
 
-    if (timeSinceLastLog >= NORMAL_LOG_INTERVAL_MS || hasSignificantDeviation || isCriticalStatus) {
-      lastLogTime = now;
-      lastLoggedBPM = parsedBPM;
+    // 4. Calculate smoothed values from current buffer
+    const avgBPM = sampleWindow.reduce((acc, s) => acc + s.bpm, 0) / sampleWindow.length;
+    const avgAC = sampleWindow.reduce((acc, s) => acc + s.ac, 0) / sampleWindow.length;
+    const latestStatus = sampleWindow[sampleWindow.length - 1].statusText;
+
+    // 5. Evaluate logging triggers
+    const isFirstLog = lastPersistedBPM === null;
+    const isTimerDue = elapsed >= LOG_INTERVAL_MS;
+    const isSpike = lastPersistedBPM !== null && Math.abs(avgBPM - lastPersistedBPM) >= 12;
+    const isAnomaly = !["NORMAL", "NORMAL SINUS"].includes(latestStatus.toUpperCase());
+
+    if (isFirstLog || isTimerDue || isSpike || isAnomaly) {
+      lastLogTimestamp = now;
+      lastPersistedBPM = avgBPM;
+
       sendLog({
-        bpm: parsedBPM,
-        peak_ac: parsedAC,
-        status: parsedStatus
+        bpm: parseFloat(avgBPM.toFixed(1)),
+        peak_ac: parseFloat(avgAC.toFixed(1)),
+        status: latestStatus
       });
     }
-  } catch (e) {
-    console.warn("Raw packet parse error:", raw);
+  } catch (err) {
+    console.warn("BLE packet parsing error:", raw);
   }
 }
 
@@ -487,12 +506,14 @@ async function sendLog(payload) {
     });
 
     if (res.ok) {
-      console.log("Telemetry ingested:", payload);
-      // Auto-refresh the displayed cloud log table
+      console.log("%c[DATABASE LOG SAVED]", "color: #22c55e", payload);
       fetchLogs();
+    } else {
+      const err = await res.json();
+      console.error("[DATABASE LOG FAILED]", res.status, err);
     }
   } catch (err) {
-    console.error("Failed to push telemetry log:", err);
+    console.error("[NETWORK ERROR LOGGING VITALS]", err);
   }
 }
   async function fetchLogs() {
