@@ -281,7 +281,7 @@
     let range = max - min;
     if (range < 15) range = 15;
 
-    // 1. Draw Grid Lines
+    // 1. Grid Lines
     ctx.strokeStyle = "#161616";
     ctx.lineWidth = 1;
 
@@ -488,7 +488,8 @@
       document.getElementById("liveDot").classList.remove("pulsing");
     }
   }
-// ==========================================
+
+  // ==========================================
   // DECOUPLED INDEPENDENT LOGGING ENGINE
   // ==========================================
   const LOG_INTERVAL_MS = 8000;
@@ -498,53 +499,64 @@
   const sampleWindow = [];
   const WINDOW_SIZE = 5;
 
-  // 1. Ingestion: Solely updates buffer & UI (zero async delays here)
   function handleBLEData(event) {
-    const raw = new TextDecoder().decode(event.target.value);
+    const raw = new TextDecoder().decode(event.target.value).trim();
+    
+    let bpm = 0;
+    let ac = 0;
+    let statusText = "NORMAL";
+
     try {
-      const data = JSON.parse(raw);
-      const bpm = parseFloat(data.bpm) || 0.0;
-      const ac = parseFloat(data.peak_ac) || 0.0;
-      const statusText = (data.status || "NORMAL").trim();
-
-      currentBPM = bpm;
-      currentAC = ac;
-      document.getElementById("bpmVal").innerText = bpm > 0 ? bpm.toFixed(1) : "--";
-      document.getElementById("acVal").innerText = ac > 0 ? ac.toFixed(1) : "--";
-      document.getElementById("statusVal").innerText = statusText.toUpperCase();
-
-      if (bpm > 30) {
-        const pulseInterval = (60 / bpm).toFixed(2);
-        document.getElementById("liveDot").style.animationDuration = `${pulseInterval}s`;
-      }
-
-      // Ignore zero or non-contact noise
-      if (bpm < 35.0 || ac < 0.2) {
-        return;
-      }
-
-      // Keep sample buffer populated
-      sampleWindow.push({ bpm, ac, statusText, time: Date.now() });
-      if (sampleWindow.length > WINDOW_SIZE) sampleWindow.shift();
-
-      // Instant spike or anomaly detection
-      const avgBPM = sampleWindow.reduce((acc, s) => acc + s.bpm, 0) / sampleWindow.length;
-      const isSpike = lastPersistedBPM > 0 && Math.abs(avgBPM - lastPersistedBPM) >= 12;
-      const isAnomaly = !["NORMAL", "NORMAL SINUS"].includes(statusText.toUpperCase());
-
-      if ((isSpike || isAnomaly) && !isSending) {
-        dispatchPayload(avgBPM, ac, statusText, isAnomaly ? "ANOMALY" : "SPIKE");
+      if (raw.startsWith("{")) {
+        const data = JSON.parse(raw);
+        bpm = parseFloat(data.bpm || data.heartRate || data.hr || data.pulse) || 0.0;
+        ac = parseFloat(data.peak_ac || data.peakAc || data.ac || data.ac_peak || data.raw_ac || data.amplitude) || 0.0;
+        statusText = (data.status || data.classification || data.rhythm || data.state || "NORMAL").trim();
+      } else if (raw.includes(",")) {
+        const parts = raw.split(",").map(s => s.trim());
+        bpm = parseFloat(parts[0]) || 0.0;
+        ac = parseFloat(parts[1]) || 0.0;
+        if (parts[2]) statusText = parts[2];
       }
     } catch (err) {
-      console.warn("BLE parse error:", raw);
+      console.warn("BLE Parse error:", raw);
+      return;
+    }
+
+    currentBPM = bpm;
+    currentAC = ac;
+    document.getElementById("bpmVal").innerText = bpm > 0 ? bpm.toFixed(1) : "--";
+    document.getElementById("acVal").innerText = ac > 0 ? ac.toFixed(1) : (bpm > 0 ? "0.0" : "--");
+    document.getElementById("statusVal").innerText = statusText.toUpperCase();
+
+    if (bpm > 30) {
+      const pulseInterval = (60 / bpm).toFixed(2);
+      document.getElementById("liveDot").style.animationDuration = `${pulseInterval}s`;
+    }
+
+    // Only gate out disconnected/zero BPM; do not block if AC is 0
+    if (bpm < 35.0) {
+      return;
+    }
+
+    sampleWindow.push({ bpm, ac, statusText, time: Date.now() });
+    if (sampleWindow.length > WINDOW_SIZE) sampleWindow.shift();
+
+    // Trigger immediate log if spike or anomaly occurs
+    const avgBPM = sampleWindow.reduce((acc, s) => acc + s.bpm, 0) / sampleWindow.length;
+    const isSpike = lastPersistedBPM > 0 && Math.abs(avgBPM - lastPersistedBPM) >= 12;
+    const isAnomaly = !["NORMAL", "NORMAL SINUS"].includes(statusText.toUpperCase());
+
+    if ((isSpike || isAnomaly) && !isSending) {
+      dispatchPayload(avgBPM, ac, statusText, isAnomaly ? "ANOMALY" : "SPIKE");
     }
   }
 
-  // 2. Independent Timer: Fires every 8 seconds without fail
+  // Periodic Dispatch Loop: Fires every 8 seconds continuously
   setInterval(() => {
     if (!isConnected || sampleWindow.length === 0 || isSending) return;
 
-    // Reject stale data older than 4 seconds
+    // Discard if sensor stopped updating for > 4 seconds
     const latestSample = sampleWindow[sampleWindow.length - 1];
     if (Date.now() - latestSample.time > 4000) return;
 
@@ -554,7 +566,7 @@
     dispatchPayload(avgBPM, avgAC, latestSample.statusText, "PERIODIC_8S");
   }, LOG_INTERVAL_MS);
 
-  // 3. Robust Dispatcher
+  // POST Dispatcher to Render Backend
   async function dispatchPayload(bpm, ac, statusText, triggerSource) {
     if (!token) return;
 
@@ -592,7 +604,7 @@
     }
   }
 
-  // Fast UI append without costly full-table network re-fetching
+  // Prepend new record directly into UI table
   function renderLatestRow(row) {
     const tbody = document.getElementById("logsTableBody");
     if (tbody.innerText.includes("NO RECORDS")) tbody.innerHTML = "";
