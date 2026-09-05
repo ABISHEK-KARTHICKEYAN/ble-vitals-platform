@@ -489,12 +489,12 @@
     }
   }
 
+// ==========================================
+  // HARDENED LOGGING ENGINE (AUTO-COMMIT FIX)
   // ==========================================
-  // HARDENED LOGGING ENGINE
-  // ==========================================
-  const LOG_INTERVAL_MS = 10000;
-  let lastLogTimestamp = Date.now(); // Initialized to now to avoid huge time-delta spikes
-  let lastPersistedBPM = null;
+  const LOG_INTERVAL_MS = 8000; // 8-second periodic log
+  let lastLogTimestamp = 0;     // Start at 0 so first packet triggers immediately
+  let lastPersistedBPM = 0;
   let isLoggingInProgress = false;
 
   const sampleWindow = [];
@@ -508,6 +508,7 @@
       const ac = parseFloat(data.peak_ac) || 0.0;
       const statusText = (data.status || "NORMAL").trim();
 
+      // Update UI real-time values immediately
       currentBPM = bpm;
       currentAC = ac;
       document.getElementById("bpmVal").innerText = bpm > 0 ? bpm.toFixed(1) : "--";
@@ -519,11 +520,12 @@
         document.getElementById("liveDot").style.animationDuration = `${pulseInterval}s`;
       }
 
-      // Non-destructive noise gate: only discard zero or sub-threshold readings, don't wipe buffer
-      if (bpm < 30 || ac < 0.2) {
+      // Ignore clear off-finger readings
+      if (bpm < 35.0 || ac < 0.2) {
         return;
       }
 
+      // Buffer valid readings
       sampleWindow.push({ bpm, ac, statusText });
       if (sampleWindow.length > WINDOW_SIZE) sampleWindow.shift();
 
@@ -533,12 +535,23 @@
 
       const now = Date.now();
       const elapsed = now - lastLogTimestamp;
-      const isFirstLog = lastPersistedBPM === null && sampleWindow.length >= 2;
+
+      // Trigger conditions:
+      // 1. Initial log: Fired on the very first valid sample
+      // 2. Timer: Fired every 8 seconds
+      // 3. Spike: Sudden swing of >= 12 BPM
+      // 4. Anomaly: AI or rule-based flag
+      const isInitial = (lastLogTimestamp === 0);
       const isTimerDue = elapsed >= LOG_INTERVAL_MS;
-      const isSpike = lastPersistedBPM !== null && Math.abs(avgBPM - lastPersistedBPM) >= 12;
+      const isSpike = lastPersistedBPM > 0 && Math.abs(avgBPM - lastPersistedBPM) >= 12;
       const isAnomaly = !["NORMAL", "NORMAL SINUS"].includes(latestStatus.toUpperCase());
 
-      if ((isFirstLog || isTimerDue || isSpike || isAnomaly) && !isLoggingInProgress) {
+      if ((isInitial || isTimerDue || isSpike || isAnomaly) && !isLoggingInProgress) {
+        console.log(`%c[INGEST TRIGGER] Initial:${isInitial} | Timer:${isTimerDue} | Spike:${isSpike} | Anomaly:${isAnomaly}`, "color: yellow;");
+        
+        lastLogTimestamp = now;
+        lastPersistedBPM = avgBPM;
+
         sendLog({
           bpm: parseFloat(avgBPM.toFixed(1)),
           peak_ac: parseFloat(avgAC.toFixed(1)),
