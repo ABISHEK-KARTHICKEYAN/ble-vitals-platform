@@ -117,7 +117,7 @@
     .waveform-wrapper {
       position: relative;
       width: 100%;
-      height: 220px;
+      height: 250px;
       background: #020202;
       border: 1px solid var(--border);
       margin-top: 1rem;
@@ -230,12 +230,12 @@
   let token = localStorage.getItem("access_token") || null;
   let currentUser = localStorage.getItem("username") || null;
   let isRegisterMode = false;
-  let lastLogTime = 0;
 
   let currentBPM = 0;
   let currentAC = 0;
   let isConnected = false;
 
+  // --- Oscilloscope State & Setup ---
   const canvas = document.getElementById("scopeCanvas");
   const ctx = canvas.getContext("2d");
   const maxPoints = 300;
@@ -266,44 +266,121 @@
     waveBuffer.push(getPPGPoint());
     waveBuffer.shift();
 
-    ctx.fillStyle = "rgba(2, 2, 2, 0.9)";
+    // Background fill
+    ctx.fillStyle = "rgba(2, 2, 2, 0.95)";
     ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-    ctx.strokeStyle = "#161616";
-    ctx.lineWidth = 1;
-    for (let x = 0; x < canvas.width; x += 30) {
-      ctx.beginPath();
-      ctx.moveTo(x, 0); ctx.lineTo(x, canvas.height); ctx.stroke();
-    }
-    for (let y = 0; y < canvas.height; y += 30) {
-      ctx.beginPath();
-      ctx.moveTo(0, y); ctx.lineTo(canvas.width, y); ctx.stroke();
-    }
+    // Coordinate & Bounds Config
+    const marginLeft = 50;
+    const marginRight = 15;
+    const marginTop = 20;
+    const marginBottom = 28;
+    const plotWidth = canvas.width - marginLeft - marginRight;
+    const plotHeight = canvas.height - marginTop - marginBottom;
 
+    // Amplitude Scaling
     let min = Math.min(...waveBuffer);
     let max = Math.max(...waveBuffer);
     let range = max - min;
     if (range < 15) range = 15;
 
+    // 1. Draw Grid Lines
+    ctx.strokeStyle = "#161616";
+    ctx.lineWidth = 1;
+
+    // Vertical Time Dividers (5 Divs = 1.0s increments across ~5s trace)
+    const numXDivs = 5;
+    for (let i = 0; i <= numXDivs; i++) {
+      const gx = marginLeft + (i * (plotWidth / numXDivs));
+      ctx.beginPath();
+      ctx.moveTo(gx, marginTop);
+      ctx.lineTo(gx, canvas.height - marginBottom);
+      ctx.stroke();
+    }
+
+    // Horizontal Voltage/AC Dividers (4 Divisions)
+    const numYDivs = 4;
+    for (let j = 0; j <= numYDivs; j++) {
+      const gy = marginTop + (j * (plotHeight / numYDivs));
+      ctx.beginPath();
+      ctx.moveTo(marginLeft, gy);
+      ctx.lineTo(canvas.width - marginRight, gy);
+      ctx.stroke();
+    }
+
+    // 2. Draw Numeric Axis Scales
+    ctx.font = "10px 'Courier New', Courier, monospace";
+    ctx.fillStyle = "#737373";
+
+    // Numeric Y-Axis (Raw Signal Amplitude / Units)
+    ctx.textAlign = "right";
+    ctx.textBaseline = "middle";
+    for (let j = 0; j <= numYDivs; j++) {
+      const gy = marginTop + (j * (plotHeight / numYDivs));
+      const val = max - (j * (range / numYDivs));
+      ctx.fillText(val.toFixed(0), marginLeft - 8, gy);
+
+      // Small Axis Tick
+      ctx.strokeStyle = "#333333";
+      ctx.beginPath();
+      ctx.moveTo(marginLeft - 4, gy);
+      ctx.lineTo(marginLeft, gy);
+      ctx.stroke();
+    }
+
+    // Y-Axis Title
+    ctx.save();
+    ctx.translate(14, marginTop + plotHeight / 2);
+    ctx.rotate(-Math.PI / 2);
+    ctx.textAlign = "center";
+    ctx.fillStyle = "#555555";
+    ctx.fillText("AMPLITUDE [AC]", 0, 0);
+    ctx.restore();
+
+    // Numeric X-Axis (Time Window in Seconds)
+    ctx.textAlign = "center";
+    ctx.textBaseline = "top";
+    for (let i = 0; i <= numXDivs; i++) {
+      const gx = marginLeft + (i * (plotWidth / numXDivs));
+      const secLabel = (i * 1.0).toFixed(1) + "s";
+      ctx.fillText(secLabel, gx, canvas.height - marginBottom + 8);
+
+      // Small Axis Tick
+      ctx.strokeStyle = "#333333";
+      ctx.beginPath();
+      ctx.moveTo(gx, canvas.height - marginBottom);
+      ctx.lineTo(gx, canvas.height - marginBottom + 4);
+      ctx.stroke();
+    }
+
+    // 3. Draw Outer Graph Boundary
+    ctx.strokeStyle = "#262626";
+    ctx.lineWidth = 1;
+    ctx.strokeRect(marginLeft, marginTop, plotWidth, plotHeight);
+
+    // 4. Render PPG Trace Line
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(marginLeft, marginTop, plotWidth, plotHeight);
+    ctx.clip(); // Clip wave to graph area
+
     ctx.strokeStyle = "#ffffff";
-    ctx.lineWidth = 2.2;
+    ctx.lineWidth = 2.0;
     ctx.shadowBlur = 8;
     ctx.shadowColor = "#ffffff";
     ctx.beginPath();
 
-    const step = canvas.width / (maxPoints - 1);
-    const padding = 25;
-    const usableHeight = canvas.height - padding * 2;
-
+    const step = plotWidth / (maxPoints - 1);
     for (let i = 0; i < maxPoints; i++) {
       const norm = (waveBuffer[i] - min) / range;
-      const y = canvas.height - padding - (norm * usableHeight);
-      const x = i * step;
+      const y = (canvas.height - marginBottom) - (norm * plotHeight);
+      const x = marginLeft + (i * step);
       if (i === 0) ctx.moveTo(x, y);
       else ctx.lineTo(x, y);
     }
     ctx.stroke();
-    ctx.shadowBlur = 0;
+    ctx.restore();
+
     requestAnimationFrame(renderScope);
   }
   requestAnimationFrame(renderScope);
@@ -422,100 +499,102 @@
     }
   }
 
-// --- Efficient Aggregated Logging System ---
-const LOG_INTERVAL_MS = 10000; // Log clean average every 10 seconds
-let lastLogTimestamp = 0;
-let lastPersistedBPM = null;
+  // ==========================================
+  // RE-DEFINED PERSISTENT LOGGING PIPELINE
+  // ==========================================
+  const LOG_INTERVAL_MS = 10000; // Commit record every 10 seconds
+  let lastLogTimestamp = 0;
+  let lastPersistedBPM = null;
+  let isLoggingInProgress = false;
 
-// Rolling window to smooth readings and discard transient outliers
-const sampleWindow = [];
-const WINDOW_SIZE = 5;
+  const sampleWindow = [];
+  const WINDOW_SIZE = 5;
 
-function handleBLEData(event) {
-  const raw = new TextDecoder().decode(event.target.value);
-  try {
-    const data = JSON.parse(raw);
-    const bpm = parseFloat(data.bpm) || 0.0;
-    const ac = parseFloat(data.peak_ac) || 0.0;
-    const statusText = (data.status || "NORMAL").trim();
+  function handleBLEData(event) {
+    const raw = new TextDecoder().decode(event.target.value);
+    try {
+      const data = JSON.parse(raw);
+      const bpm = parseFloat(data.bpm) || 0.0;
+      const ac = parseFloat(data.peak_ac) || 0.0;
+      const statusText = (data.status || "NORMAL").trim();
 
-    // 1. Always update real-time visual displays & oscilloscope
-    currentBPM = bpm;
-    currentAC = ac;
-    document.getElementById("bpmVal").innerText = bpm > 0 ? bpm.toFixed(1) : "--";
-    document.getElementById("acVal").innerText = ac > 0 ? ac.toFixed(1) : "--";
-    document.getElementById("statusVal").innerText = statusText.toUpperCase();
+      // Update real-time display & metrics
+      currentBPM = bpm;
+      currentAC = ac;
+      document.getElementById("bpmVal").innerText = bpm > 0 ? bpm.toFixed(1) : "--";
+      document.getElementById("acVal").innerText = ac > 0 ? ac.toFixed(1) : "--";
+      document.getElementById("statusVal").innerText = statusText.toUpperCase();
 
-    if (bpm > 40) {
-      const pulseInterval = (60 / bpm).toFixed(2);
-      document.getElementById("liveDot").style.animationDuration = `${pulseInterval}s`;
+      if (bpm > 30) {
+        const pulseInterval = (60 / bpm).toFixed(2);
+        document.getElementById("liveDot").style.animationDuration = `${pulseInterval}s`;
+      }
+
+      // 1. Noise Filter Gate (Accommodate soft contact; drop clear zero-noise)
+      if (bpm < 35 || ac < 0.5) {
+        if (sampleWindow.length > 0) sampleWindow.length = 0;
+        return;
+      }
+
+      // 2. Rolling Average Calculation
+      sampleWindow.push({ bpm, ac, statusText });
+      if (sampleWindow.length > WINDOW_SIZE) sampleWindow.shift();
+
+      const avgBPM = sampleWindow.reduce((acc, s) => acc + s.bpm, 0) / sampleWindow.length;
+      const avgAC = sampleWindow.reduce((acc, s) => acc + s.ac, 0) / sampleWindow.length;
+      const latestStatus = sampleWindow[sampleWindow.length - 1].statusText;
+
+      // 3. Multi-Factor Ingest Triggers
+      const now = Date.now();
+      const elapsed = now - lastLogTimestamp;
+      const isFirstLog = lastPersistedBPM === null;
+      const isTimerDue = elapsed >= LOG_INTERVAL_MS;
+      const isSpike = lastPersistedBPM !== null && Math.abs(avgBPM - lastPersistedBPM) >= 12;
+      const isAnomaly = !["NORMAL", "NORMAL SINUS"].includes(latestStatus.toUpperCase());
+
+      if ((isFirstLog || isTimerDue || isSpike || isAnomaly) && !isLoggingInProgress) {
+        lastLogTimestamp = now;
+        lastPersistedBPM = avgBPM;
+
+        sendLog({
+          bpm: parseFloat(avgBPM.toFixed(1)),
+          peak_ac: parseFloat(avgAC.toFixed(1)),
+          status: latestStatus
+        });
+      }
+    } catch (err) {
+      console.warn("BLE packet parsing error:", raw);
     }
+  }
 
-    // 2. Reject zero or non-contact readings (Finger removed)
-    if (bpm < 40 || ac < 1.0) {
-      sampleWindow.length = 0; // Clear window when finger is off
-      return;
-    }
+  async function sendLog(payload) {
+    if (!token) return;
 
-    // 3. Push to rolling average buffer
-    sampleWindow.push({ bpm, ac, statusText });
-    if (sampleWindow.length > WINDOW_SIZE) {
-      sampleWindow.shift();
-    }
-
-    const now = Date.now();
-    const elapsed = now - lastLogTimestamp;
-
-    // 4. Calculate smoothed values from current buffer
-    const avgBPM = sampleWindow.reduce((acc, s) => acc + s.bpm, 0) / sampleWindow.length;
-    const avgAC = sampleWindow.reduce((acc, s) => acc + s.ac, 0) / sampleWindow.length;
-    const latestStatus = sampleWindow[sampleWindow.length - 1].statusText;
-
-    // 5. Evaluate logging triggers
-    const isFirstLog = lastPersistedBPM === null;
-    const isTimerDue = elapsed >= LOG_INTERVAL_MS;
-    const isSpike = lastPersistedBPM !== null && Math.abs(avgBPM - lastPersistedBPM) >= 12;
-    const isAnomaly = !["NORMAL", "NORMAL SINUS"].includes(latestStatus.toUpperCase());
-
-    if (isFirstLog || isTimerDue || isSpike || isAnomaly) {
-      lastLogTimestamp = now;
-      lastPersistedBPM = avgBPM;
-
-      sendLog({
-        bpm: parseFloat(avgBPM.toFixed(1)),
-        peak_ac: parseFloat(avgAC.toFixed(1)),
-        status: latestStatus
+    isLoggingInProgress = true;
+    try {
+      const res = await fetch(`${BACKEND_URL}/api/log`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${token}`
+        },
+        body: JSON.stringify(payload)
       });
+
+      if (res.ok) {
+        console.log("%c[DATABASE LOG COMMITTED]", "color: #22c55e", payload);
+        fetchLogs();
+      } else {
+        const err = await res.json();
+        console.error("[DATABASE LOG REJECTED]", res.status, err);
+      }
+    } catch (err) {
+      console.error("[NETWORK ERROR POSTING VITALS]", err);
+    } finally {
+      isLoggingInProgress = false;
     }
-  } catch (err) {
-    console.warn("BLE packet parsing error:", raw);
   }
-}
 
-async function sendLog(payload) {
-  if (!token) return;
-
-  try {
-    const res = await fetch(`${BACKEND_URL}/api/log`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "Authorization": `Bearer ${token}`
-      },
-      body: JSON.stringify(payload)
-    });
-
-    if (res.ok) {
-      console.log("%c[DATABASE LOG SAVED]", "color: #22c55e", payload);
-      fetchLogs();
-    } else {
-      const err = await res.json();
-      console.error("[DATABASE LOG FAILED]", res.status, err);
-    }
-  } catch (err) {
-    console.error("[NETWORK ERROR LOGGING VITALS]", err);
-  }
-}
   async function fetchLogs() {
     if (!token) return;
     try {
@@ -526,7 +605,7 @@ async function sendLog(payload) {
         const logs = await res.json();
         const tbody = document.getElementById("logsTableBody");
         tbody.innerHTML = "";
-        if (logs.length === 0) {
+        if (!logs || logs.length === 0) {
           tbody.innerHTML = `<tr><td colspan="4" style="text-align:center;">NO LOGS FOUND</td></tr>`;
           return;
         }
@@ -542,7 +621,7 @@ async function sendLog(payload) {
         });
       }
     } catch (err) {
-      console.error(err);
+      console.error("[FETCH LOGS ERROR]", err);
     }
   }
 </script>
