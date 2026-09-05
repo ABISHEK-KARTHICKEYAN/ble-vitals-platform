@@ -45,9 +45,9 @@ class Token(BaseModel):
     username: str
 
 class LogPayload(BaseModel):
-    bpm: float
-    peak_ac: float
-    status: str
+    bpm: float = 0.0
+    peak_ac: float = 0.0
+    status: str = "NORMAL"
 
 def hash_password(password: str) -> str:
     pwd_bytes = password.encode("utf-8")

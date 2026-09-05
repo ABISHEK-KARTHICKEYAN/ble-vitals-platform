@@ -448,26 +448,34 @@
     }
   }
 
-  async function sendLog(data) {
-    if (!token) return;
-    try {
-      await fetch(`${BACKEND_URL}/api/log`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "Authorization": `Bearer ${token}`
-        },
-        body: JSON.stringify({
-          bpm: data.bpm,
-          peak_ac: data.peak_ac,
-          status: data.status
-        })
-      });
-    } catch (err) {
-      console.error(err);
-    }
-  }
+ async function sendLog(data) {
+  if (!token) return;
 
+  // Sanitize and force numeric / string types expected by Pydantic
+  const payload = {
+    bpm: parseFloat(data.bpm) || 0.0,
+    peak_ac: parseFloat(data.peak_ac) || 0.0,
+    status: String(data.status || "NORMAL")
+  };
+
+  try {
+    const res = await fetch(`${BACKEND_URL}/api/log`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${token}`
+      },
+      body: JSON.stringify(payload)
+    });
+
+    if (!res.ok) {
+      const errDetail = await res.json();
+      console.error("422 Validation Error details:", errDetail);
+    }
+  } catch (err) {
+    console.error("Network error sending log:", err);
+  }
+}
   async function fetchLogs() {
     if (!token) return;
     try {
