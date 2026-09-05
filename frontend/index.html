@@ -422,41 +422,59 @@
     }
   }
 
-  function handleBLEData(event) {
-    const raw = new TextDecoder().decode(event.target.value);
-    try {
-      const data = JSON.parse(raw);
-      currentBPM = data.bpm || 0;
-      currentAC = data.peak_ac || 0;
+  // --- Optimized Logging Config ---
+const NORMAL_LOG_INTERVAL_MS = 15000; // Log valid steady vitals every 15s (instead of 3s)
+let lastLoggedBPM = 0;
 
-      document.getElementById("bpmVal").innerText = currentBPM;
-      document.getElementById("acVal").innerText = currentAC;
-      document.getElementById("statusVal").innerText = (data.status || "--").toUpperCase();
+function handleBLEData(event) {
+  const raw = new TextDecoder().decode(event.target.value);
+  try {
+    const data = JSON.parse(raw);
+    const parsedBPM = parseFloat(data.bpm) || 0;
+    const parsedAC = parseFloat(data.peak_ac) || 0;
+    const parsedStatus = String(data.status || "IDLE").toUpperCase();
 
-      if (currentBPM > 40) {
-        const pulseInterval = (60 / currentBPM).toFixed(2);
-        document.getElementById("liveDot").style.animationDuration = `${pulseInterval}s`;
-      }
+    // Always update the live UI / oscilloscope at full sensor refresh speed
+    currentBPM = parsedBPM;
+    currentAC = parsedAC;
+    document.getElementById("bpmVal").innerText = parsedBPM > 0 ? parsedBPM : "--";
+    document.getElementById("acVal").innerText = parsedAC > 0 ? parsedAC : "--";
+    document.getElementById("statusVal").innerText = parsedStatus;
 
-      const now = Date.now();
-      if (now - lastLogTime > 3000) {
-        lastLogTime = now;
-        sendLog(data);
-      }
-    } catch (e) {
-      console.warn("Raw packet error:", raw);
+    if (currentBPM > 40) {
+      const pulseInterval = (60 / currentBPM).toFixed(2);
+      document.getElementById("liveDot").style.animationDuration = `${pulseInterval}s`;
     }
+
+    // --- Database Ingestion Filter ---
+    // 1. Filter out zeroes or idle non-readings (no finger placed)
+    if (parsedBPM <= 35 || parsedAC <= 5) {
+      return; 
+    }
+
+    const now = Date.now();
+    const timeSinceLastLog = now - lastLogTime;
+    
+    // 2. Significant delta trigger: log instantly if BPM fluctuates by more than 10 BPM
+    const hasSignificantDeviation = Math.abs(parsedBPM - lastLoggedBPM) >= 10;
+    const isCriticalStatus = parsedStatus !== "NORMAL" && parsedStatus !== "NORMAL SINUS";
+
+    if (timeSinceLastLog >= NORMAL_LOG_INTERVAL_MS || hasSignificantDeviation || isCriticalStatus) {
+      lastLogTime = now;
+      lastLoggedBPM = parsedBPM;
+      sendLog({
+        bpm: parsedBPM,
+        peak_ac: parsedAC,
+        status: parsedStatus
+      });
+    }
+  } catch (e) {
+    console.warn("Raw packet parse error:", raw);
   }
+}
 
- async function sendLog(data) {
+async function sendLog(payload) {
   if (!token) return;
-
-  // Sanitize and force numeric / string types expected by Pydantic
-  const payload = {
-    bpm: parseFloat(data.bpm) || 0.0,
-    peak_ac: parseFloat(data.peak_ac) || 0.0,
-    status: String(data.status || "NORMAL")
-  };
 
   try {
     const res = await fetch(`${BACKEND_URL}/api/log`, {
@@ -468,12 +486,13 @@
       body: JSON.stringify(payload)
     });
 
-    if (!res.ok) {
-      const errDetail = await res.json();
-      console.error("422 Validation Error details:", errDetail);
+    if (res.ok) {
+      console.log("Telemetry ingested:", payload);
+      // Auto-refresh the displayed cloud log table
+      fetchLogs();
     }
   } catch (err) {
-    console.error("Network error sending log:", err);
+    console.error("Failed to push telemetry log:", err);
   }
 }
   async function fetchLogs() {
