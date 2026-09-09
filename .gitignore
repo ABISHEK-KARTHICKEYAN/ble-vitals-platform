@@ -3,3 +3,6 @@ __pycache__/
 *.db
 .vscode/
 venv/
+ml_pipeline/data/
+venv_ml/
+**/.ipynb_checkpoints/
